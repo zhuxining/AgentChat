@@ -7,29 +7,32 @@ const host = process.env.TAURI_DEV_HOST;
 const ignorePatterns = [
   "**/routeTree.gen.ts",
   ".agents/skills",
-  "docs/refer/**",
-  ".zcode/**",
   "**/dist/**",
   "**/node_modules/**",
   "**/.tanstack/**",
-  "**/local.db*",
   "**/.vite/**",
   "**/out/**",
-  "packages/ui/src/components/**",
-  "packages/db/drizzle-platform",
 ];
-// https://vite.dev/config/
+
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react({ compiler: true }), tailwindcss()],
   lint: {
     ignorePatterns,
     jsPlugins: [
       { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
       { name: "shadcn", specifier: "@shadcn/lint" },
     ],
-    rules: { "vite-plus/prefer-vite-plus-imports": "error" },
+    rules: { "vite-plus/prefer-vite-plus-imports": "error" as const },
     options: { typeAware: true, typeCheck: true },
-    plugins: ["eslint", "typescript", "react", "import", "promise", "node", "vitest"],
+    plugins: [
+      "eslint",
+      "typescript",
+      "react",
+      "import",
+      "promise",
+      "node",
+      "vitest",
+    ] satisfies Array<"eslint" | "typescript" | "react" | "import" | "promise" | "node" | "vitest">,
   },
   fmt: {
     ignorePatterns,
@@ -40,13 +43,18 @@ export default defineConfig(async () => ({
   },
   staged: {
     "*.{js,ts,jsx,tsx,vue,svelte,json,jsonc,css,md}": "vp check --fix",
+    "*.{rs}": "cargo fmt --check",
   },
   resolve: { tsconfigPaths: true },
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
+  // Tauri integration settings.
   clearScreen: false,
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  build: {
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
+    minify: !process.env.TAURI_ENV_DEBUG,
+    sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
+  },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,

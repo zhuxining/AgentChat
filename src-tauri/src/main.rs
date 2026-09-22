@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    AgentChat_lib::run()
+    agentchat_lib::run()
 }

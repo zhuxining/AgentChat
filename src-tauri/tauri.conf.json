@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.syneju.agentchat",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "vpr dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "vpr build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
