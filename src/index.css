@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "tw-shimmer";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -50,6 +51,22 @@
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
   --radius-4xl: calc(var(--radius) * 2.6);
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
 }
 
 /* Flexoki color system — source of truth: docs/ui/desktop-ui.pen */
@@ -200,3 +217,7 @@
     background: transparent;
   }
 }
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

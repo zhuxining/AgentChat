@@ -22,7 +22,7 @@
 
 ## 3. 总体架构
 
-~~~text
+```text
 ┌─────────────────────────────────────────┐
 │              Agent Host                 │
 │                                         │
@@ -42,7 +42,7 @@
                           │   Pi Runtime   │
                           │  Coding Agent  │
                           └────────────────┘
-~~~
+```
 
 ### 3.1 Host
 
@@ -82,14 +82,14 @@ Host 不应绑定某一个 UI 窗口。桌面窗口关闭后，Host 是否继续
 
 ## 4. 领域模型
 
-~~~text
+```text
 User
  ├── Device
  ├── Agent
  ├── Conversation ── Message / Event
  └── Task ── Run ── ToolCall
                       └── Approval
-~~~
+```
 
 ### 4.1 核心实体
 
@@ -106,15 +106,15 @@ User
 
 ### 4.2 状态归属
 
-| 状态 | 归属 | 客户端职责 |
-|---|---|---|
-| Agent 配置 | Host | 展示和编辑 |
-| 消息历史 | Host | 展示、分页和本地缓存 |
-| Run 状态 | Host | 展示实时状态 |
-| Task 状态 | Host | 展示、取消和重试 |
-| 审批状态 | Host | 提交用户决定 |
-| 输入草稿 | 客户端 | 本地保存和恢复 |
-| 已读位置 | Host 按设备记录 | 上报和展示 |
+| 状态       | 归属            | 客户端职责           |
+| ---------- | --------------- | -------------------- |
+| Agent 配置 | Host            | 展示和编辑           |
+| 消息历史   | Host            | 展示、分页和本地缓存 |
+| Run 状态   | Host            | 展示实时状态         |
+| Task 状态  | Host            | 展示、取消和重试     |
+| 审批状态   | Host            | 提交用户决定         |
+| 输入草稿   | 客户端          | 本地保存和恢复       |
+| 已读位置   | Host 按设备记录 | 上报和展示           |
 
 ## 5. Pi Agent Runtime 集成
 
@@ -160,7 +160,7 @@ Pi 的具体接入方式应以所选 Pi 版本提供的稳定接口为准，可�
 
 AgentChat 维护自己的统一 Run 生命周期：
 
-~~~text
+```text
 accepted
   → preparing
   → generating
@@ -168,7 +168,7 @@ accepted
   → awaiting_approval
   → running_task
   → completed / failed / cancelled
-~~~
+```
 
 每个 Run 必须具备：
 
@@ -264,13 +264,13 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 同步以“Host 事件游标”为基础，而不是以客户端时间戳猜测差异：
 
-~~~text
+```text
 客户端连接
   → 提交 device_id + last_event_cursor
   → Host 返回缺失事件
   → 客户端应用事件
   → Host 推送后续实时事件
-~~~
+```
 
 冲突处理原则：
 
@@ -284,12 +284,12 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 权限模型至少包含四个维度：
 
-~~~text
+```text
 谁（User / Device / Agent）
   能对什么（Resource）
   执行什么操作（Action）
   在什么范围内（Scope）
-~~~
+```
 
 第一阶段需要保护：
 
@@ -316,19 +316,19 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 ## 12. 技术选型边界
 
-| 领域 | 第一阶段建议 | 选择理由 |
-|---|---|---|
-| 桌面容器 | Tauri 2 | 当前项目基础，适合系统能力和低资源桌面应用 |
-| UI | React 19 + TypeScript | 当前项目基础，适合复杂会话交互 |
-| 产品 Host | Rust 宿主内的 AgentChat 领域模块 | 承载身份、会话、任务、权限和多端状态 |
-| Coding Agent Runtime | Pi | 复用成熟的 Coding Agent，不重复研发 Agent Loop |
-| Pi 集成 | Pi Adapter | 隔离 Pi 的 RPC、SDK 或进程协议变化 |
-| 结构化存储 | SQLite | 单机可靠、可备份，适合 local-first |
-| 实时事件 | HTTP + SSE 起步 | 服务端单向事件流足以覆盖消息和任务更新 |
-| 文件存储 | 本地应用数据目录 | 避免把大文件塞入消息数据库 |
-| 密钥存储 | 系统安全存储 / Tauri Stronghold | 不让密钥进入普通配置和前端状态 |
-| 前端缓存 | React Query + Zustand 按职责使用 | 区分服务端数据与 UI 瞬时状态 |
-| 测试 | Vitest、Rust 单元测试、协议级集成测试 | 覆盖领域逻辑、状态机和跨端契约 |
+| 领域                 | 第一阶段建议                          | 选择理由                                       |
+| -------------------- | ------------------------------------- | ---------------------------------------------- |
+| 桌面容器             | Tauri 2                               | 当前项目基础，适合系统能力和低资源桌面应用     |
+| UI                   | React 19 + TypeScript                 | 当前项目基础，适合复杂会话交互                 |
+| 产品 Host            | Rust 宿主内的 AgentChat 领域模块      | 承载身份、会话、任务、权限和多端状态           |
+| Coding Agent Runtime | Pi                                    | 复用成熟的 Coding Agent，不重复研发 Agent Loop |
+| Pi 集成              | Pi Adapter                            | 隔离 Pi 的 RPC、SDK 或进程协议变化             |
+| 结构化存储           | SQLite                                | 单机可靠、可备份，适合 local-first             |
+| 实时事件             | HTTP + SSE 起步                       | 服务端单向事件流足以覆盖消息和任务更新         |
+| 文件存储             | 本地应用数据目录                      | 避免把大文件塞入消息数据库                     |
+| 密钥存储             | 系统安全存储 / Tauri Stronghold       | 不让密钥进入普通配置和前端状态                 |
+| 前端缓存             | React Query + Zustand 按职责使用      | 区分服务端数据与 UI 瞬时状态                   |
+| 测试                 | Vitest、Rust 单元测试、协议级集成测试 | 覆盖领域逻辑、状态机和跨端契约                 |
 
 这些是第一阶段的实现建议，不是对未来云端架构的永久限制。
 
@@ -336,7 +336,7 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 第一阶段可以采用：
 
-~~~text
+```text
 Tauri Application
 ├── React Renderer
 ├── Tauri Commands / Events
@@ -345,17 +345,17 @@ Tauri Application
 └── SQLite / File Store / Secret Store
              │
              └── Pi Agent Runtime
-~~~
+```
 
 Pi Runtime 可以作为由 Host 管理的独立进程或外部 Agent 服务运行。AgentChat 不把 Pi 的内部执行模块复制进 Tauri；当后台任务、远程访问或资源隔离成为明确需求后，可以将 Pi Runtime 与 Host 进一步隔离：
 
-~~~text
+```text
 Desktop UI ── Host API ── AgentChat Host
                          ├── Product Domain
                          ├── Pi Adapter ── Pi Runtime
                          ├── Scheduler
                          └── Data Store
-~~~
+```
 
 拆分的触发条件应是可观测的产品需求，而不是预先为分布式架构增加复杂度。
 
@@ -426,7 +426,7 @@ Desktop UI ── Host API ── AgentChat Host
 
 AgentChat 的核心不是“重新实现一个 Coding Agent”，而是建立一个本地优先的 Agent Host，并通过 Pi Adapter 使用 Pi：
 
-~~~text
+```text
 客户端负责交互
 Host 负责产品事实与权限
 Pi 负责 Coding Agent 执行
@@ -434,6 +434,6 @@ Pi Adapter 负责协议转换
 事件流负责同步与恢复
 任务系统负责持续工作
 审计系统负责可追溯性
-~~~
+```
 
 只要这些边界保持稳定，桌面端、手机端、网页端以及未来的远程 Host 都可以逐步增加，而不会改变产品的核心模型。
