@@ -15,8 +15,8 @@
 1. **Local-first：** 用户数据、Agent 状态和任务记录默认归本地 Host 管理。
 2. **Host 是事实来源：** 所有客户端都访问同一份会话、消息和任务状态；客户端缓存不可作为最终事实来源。
 3. **Agent 与会话分离：** Agent 是长期身份，会话是交互容器，任务是可独立运行的执行单元。
-4. **事件优先：** 消息、工具调用、审批、任务进度和错误都以可追踪事件表达。
-5. **渐进式信任：** 工具权限按 Agent、设备、操作和资源范围授权，高风险操作必须经过用户确认。
+4. **事件优先：** 消息、工具调用、任务进度和错误都以可追踪事件表达。
+5. **配置时确定信任：** Agent 在配置阶段确定系统上下文、能力和资源范围；聊天过程按既定配置执行，不建立独立的交互确认工作流。
 6. **可恢复：** 长任务、断线、多端重连和模型失败不能破坏已有消息与执行记录。
 7. **先简单后分布式：** 第一阶段优先单机进程和局域网访问，产品验证后再引入远程中继或云端服务。
 
@@ -30,7 +30,7 @@
 │  Conversation & Event Store             │
 │  Pi Agent Adapter ───────────────┐      │
 │  Task Scheduler / Run Manager    │      │
-│  Permission / Approval / Audit   │      │
+│  Auth / Policy / Audit           │      │
 │  Secret Store                    │      │
 └────────────────────┬────────────┼──────┘
                      │            │
@@ -51,7 +51,7 @@ Host 是运行在用户本地电脑上的长期进程，负责：
 - 保存用户、设备、Agent、会话、消息和任务
 - 编排 Pi Agent Runtime 的会话
 - 保存 Pi 运行状态和 AgentChat 领域状态
-- 处理用户审批和权限判断
+- 处理设备身份、访问策略和必要的操作限制
 - 向已关联设备推送事件
 - 在客户端断开后继续执行后台任务
 
@@ -65,7 +65,7 @@ Host 不应绑定某一个 UI 窗口。桌面窗口关闭后，Host 是否继续
 - Agent 状态
 - 任务进度
 - 文件选择和上传
-- 审批操作
+- 工具交互和必要的用户补充输入
 - 本地草稿与临时缓存
 
 客户端不能直接写入核心数据库，也不能绕过 Host 直接调用 Agent 工具。
@@ -76,9 +76,9 @@ Host 不应绑定某一个 UI 窗口。桌面窗口关闭后，Host 是否继续
 
 - React：桌面 UI、会话交互和状态展示
 - Rust/Tauri：窗口、系统能力、生命周期、密钥和本地 Host 启动
-- Host Domain：会话、消息、Agent、任务和权限等产品领域逻辑
+- Host Domain：会话、消息、Agent、任务和访问策略等产品领域逻辑
 - Pi Adapter：连接外部 Pi Agent Runtime；AgentChat 不重新实现 Coding Agent
-- AgentChat Domain：只负责产品层的 Agent、会话、任务、权限和多端状态
+- AgentChat Domain：只负责产品层的 Agent、会话、任务、访问策略和多端状态
 
 ## 4. 领域模型
 
@@ -88,20 +88,18 @@ User
  ├── Agent
  ├── Conversation ── Message / Event
  └── Task ── Run ── ToolCall
-                      └── Approval
 ```
 
 ### 4.1 核心实体
 
 - **User：** 本地安装实例的用户身份；第一阶段默认单用户。
-- **Device：** 已配对的客户端，拥有设备身份、名称、最后在线时间和权限。
-- **Agent：** 身份、系统指令、能力声明、记忆范围和生命周期的集合。
+- **Device：** 已配对的客户端，拥有设备身份、名称、最后在线时间和访问范围。
+- **Agent：** 身份、系统指令、能力声明、记忆范围、工具权限和生命周期的集合；上下文与权限在配置 Agent 时确定。
 - **Conversation：** 用户与一个或多个 Agent 的长期交互容器。
 - **Message：** 用户消息、Agent 消息、系统消息和事件消息的统一载体。
 - **Task：** 从对话中产生的可跟踪工作，拥有状态、进度、输入和输出。
 - **Run：** Agent 对一次消息或任务的执行实例。
 - **ToolCall：** 一次具体工具调用及其输入、结果和错误。
-- **Approval：** 等待用户确认的操作请求。
 - **AuditEvent：** 重要状态变化和安全相关行为的可追溯记录。
 
 ### 4.2 状态归属
@@ -112,7 +110,6 @@ User
 | 消息历史   | Host            | 展示、分页和本地缓存 |
 | Run 状态   | Host            | 展示实时状态         |
 | Task 状态  | Host            | 展示、取消和重试     |
-| 审批状态   | Host            | 提交用户决定         |
 | 输入草稿   | 客户端          | 本地保存和恢复       |
 | 已读位置   | Host 按设备记录 | 上报和展示           |
 
@@ -136,7 +133,7 @@ AgentChat 负责：
 - Agent 的产品身份和配置
 - 会话、消息和任务
 - 多端访问和通知
-- 产品级权限策略
+- 产品级访问策略和工具边界
 - Pi 会话与 AgentChat 会话的映射
 - 统一的状态展示、审计和错误反馈
 
@@ -150,8 +147,8 @@ Pi Adapter 是 AgentChat 与 Pi 之间唯一的集成边界。它负责：
 - 创建、恢复和销毁 Pi 会话
 - 将 AgentChat 用户消息转换为 Pi 请求
 - 将 Pi 的流式输出转换为 AgentChat 事件
-- 转换 Pi 的工具调用、审批、进度、完成和错误事件
-- 将取消、继续和用户确认传回 Pi
+- 转换 Pi 的工具调用、进度、完成和错误事件
+- 将取消、继续和用户补充输入传回 Pi
 - 保存 AgentChat Run 与 Pi Session 的关联
 
 Pi 的具体接入方式应以所选 Pi 版本提供的稳定接口为准，可以是 RPC、SDK、子进程协议或其他 Agent 接口；架构层只依赖 Pi Adapter，不让产品领域模型绑定 Pi 的内部数据结构。
@@ -165,7 +162,6 @@ accepted
   → preparing
   → generating
   → tool_calling
-  → awaiting_approval
   → running_task
   → completed / failed / cancelled
 ```
@@ -195,8 +191,8 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 - run.status_changed
 - tool.call_started
 - tool.call_completed
-- approval.requested
-- approval.resolved
+- interaction.requested
+- interaction.resolved
 - task.progressed
 - task.completed
 - task.failed
@@ -222,7 +218,7 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 - 发送消息
 - 流式事件
 - 创建、暂停、取消任务
-- 提交审批结果
+- 提交用户交互结果
 - 文件上传和下载
 - 设备心跳和连接状态
 
@@ -248,7 +244,6 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 - tasks
 - runs
 - tool_calls
-- approvals
 - memories
 - audit_events
 
@@ -276,19 +271,19 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 - 消息由 Host 分配顺序和 ID
 - 同一消息的发送请求必须支持幂等键
-- 任务取消、审批等命令必须返回最终状态
+- 任务取消等命令必须返回最终状态
 - 客户端重复提交不能产生重复任务
-- 客户端只允许修改自己拥有权限的字段
+- 客户端只允许修改自己可访问范围内的字段
 
-## 10. 权限与安全
+## 10. 身份与安全
 
-权限模型至少包含四个维度：
+安全策略以 Agent 配置为主要入口，只保留产品确实需要的边界：
 
 ```text
-谁（User / Device / Agent）
-  能对什么（Resource）
-  执行什么操作（Action）
-  在什么范围内（Scope）
+设备身份与配对凭据
+  → 访问 Host 和会话数据
+Agent 配置（上下文 / 能力 / 权限）
+  → 约束 Agent / Tool 可访问的资源范围
 ```
 
 第一阶段需要保护：
@@ -297,10 +292,10 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 - 模型供应商密钥
 - 外部连接器凭据
 - 文件访问范围
-- 工具执行权限
+- 工具可访问的资源范围
 - 设备配对凭据
 
-高风险动作必须经过审批，例如删除文件、发送外部消息、修改远程数据和执行不可逆操作。审批请求必须包含操作说明、目标资源和有效期，不能只显示“是否继续”。
+聊天场景不设置独立的确认队列、确认实体或确认状态机。Agent 已在配置阶段获得所需的上下文和权限，聊天过程直接按配置执行；如果需要用户补充信息或选择参数，使用普通交互消息表达，并由当前会话继续处理。Host 只负责校验既定配置、限制路径和资源范围、保护凭据，不在每次工具调用前重新发起授权流程。
 
 密钥不进入前端状态、不写入普通日志、不随消息同步到其他设备；桌面端使用系统安全存储能力保存本地凭据。
 
@@ -310,7 +305,7 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 
 1. 会话附件：用户主动发送给 Agent 的文件。
 2. Agent 产物：Agent 生成的报告、导出文件或中间结果。
-3. 工具资源：Agent 获得授权后访问的本地文件。
+3. 工具资源：Agent 在 Host 允许的资源范围内访问的本地文件。
 
 文件应有独立的资源 ID、来源、所属会话或任务、访问范围和删除状态。消息中只引用文件资源，不直接承载大文件内容。
 
@@ -320,7 +315,7 @@ Pi 不直接操作 AgentChat UI；Pi Adapter 将 Pi 事件转换为 AgentChat �
 | -------------------- | ------------------------------------- | ---------------------------------------------- |
 | 桌面容器             | Tauri 2                               | 当前项目基础，适合系统能力和低资源桌面应用     |
 | UI                   | React 19 + TypeScript                 | 当前项目基础，适合复杂会话交互                 |
-| 产品 Host            | Rust 宿主内的 AgentChat 领域模块      | 承载身份、会话、任务、权限和多端状态           |
+| 产品 Host            | Rust 宿主内的 AgentChat 领域模块      | 承载身份、会话、任务、访问策略和多端状态       |
 | Coding Agent Runtime | Pi                                    | 复用成熟的 Coding Agent，不重复研发 Agent Loop |
 | Pi 集成              | Pi Adapter                            | 隔离 Pi 的 RPC、SDK 或进程协议变化             |
 | 结构化存储           | SQLite                                | 单机可靠、可备份，适合 local-first             |
@@ -369,7 +364,7 @@ Desktop UI ── Host API ── AgentChat Host
 - Pi 会话创建和消息发送
 - Pi 流式回复转换
 - Run 状态
-- Pi 工具事件和审批事件展示
+- Pi 工具事件和交互事件展示
 
 ### B. 任务化
 
@@ -392,7 +387,7 @@ Desktop UI ── Host API ── AgentChat Host
 
 - 安全远程访问
 - 多用户和工作区
-- Agent 共享与权限隔离
+- Agent 共享与访问范围隔离
 - 更细粒度审计
 
 ## 15. 架构验收标准
@@ -402,7 +397,7 @@ Desktop UI ── Host API ── AgentChat Host
 1. 关闭并重新打开桌面端后，会话、消息和任务状态可恢复。
 2. Agent 回复流中断后，客户端可以通过事件游标补齐最终状态。
 3. 同一发送请求重试不会生成重复消息或重复任务。
-4. Agent 调用高风险工具时，未经审批不能完成实际操作。
+4. Agent 调用工具时只能访问 Host 明确允许的资源范围。
 5. 桌面端退出后，已启动的任务是否继续运行有明确且可验证的策略。
 6. 第二个设备可以配对、查看历史并继续发送消息。
 7. 多端同时操作时，Host 能提供一致的最终状态。
@@ -416,9 +411,9 @@ Desktop UI ── Host API ── AgentChat Host
 - 第一阶段是否只支持局域网，还是同时需要远程访问
 - 模型调用是否支持本地模型
 - Agent 工具是否运行在 Host 内，还是隔离为独立 Worker
-- Pi 当前版本提供哪一种稳定集成接口，以及其会话、事件和审批能力
+- Pi 当前版本提供哪一种稳定集成接口，以及其会话、事件和交互能力
 - Pi Session 是否由 Pi 持久化、由 AgentChat 持久化，还是采用双向引用
-- AgentChat 产品权限如何映射为 Pi 的工具授权
+- AgentChat 的资源边界如何映射为 Pi 的工具授权
 - 文件和记忆是否需要用户可见、可编辑、可导出
 - 何时从单用户模型演进到家庭或团队工作区
 
@@ -428,7 +423,7 @@ AgentChat 的核心不是“重新实现一个 Coding Agent”，而是建立一
 
 ```text
 客户端负责交互
-Host 负责产品事实与权限
+Host 负责产品事实与安全边界
 Pi 负责 Coding Agent 执行
 Pi Adapter 负责协议转换
 事件流负责同步与恢复
