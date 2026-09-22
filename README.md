@@ -1,1 +1,1 @@
-# MindClaw
+# AgentChat

@@ -26,7 +26,7 @@ details when the documentation isn't enough.
 
 ## Project Overview
 
-MindClaw is a Tauri 2.0 desktop application combining a React 19 + TypeScript frontend with a Rust backend. Package manager is **Bun**.
+AgentChat is a Tauri 2.0 desktop application combining a React 19 + TypeScript frontend with a Rust backend. Package manager is **Bun**.
 
 > Full architecture docs: `docs/architecture/README.md`
 

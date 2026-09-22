@@ -1,8 +1,0 @@
-{
-	"hooks": {},
-	"enabledPlugins": {
-		"security-guidance@claude-plugins-official": true,
-		"feature-dev@claude-plugins-official": true,
-		"agent-skills@addy-agent-skills": true
-	}
-}

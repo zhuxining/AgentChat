@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "mindclaw",
+  "productName": "agentchat",
   "version": "0.1.0",
-  "identifier": "com.syneju.mindclaw",
+  "identifier": "com.syneju.agentchat",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "MindClaw",
+        "title": "AgentChat",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
