@@ -7,10 +7,9 @@
     "dev": "vp dev",
     "build": "tsc && vp build",
     "preview": "vp preview",
-    "check": "vp check --fix",
+    "check": "vp check --fix && cargo fmt --manifest-path src-tauri/Cargo.toml --check",
     "tauri": "tauri",
-    "test": "vp test run",
-    "test:watch": "vp test"
+    "test": "vp test"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
