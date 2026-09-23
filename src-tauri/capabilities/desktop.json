@@ -17,6 +17,9 @@
     "process:default",
     "stronghold:default",
     "updater:default",
-    "window-state:default"
+    "window-state:default",
+    "sql:default",
+    "shell:default",
+    "websocket:default"
   ]
 }
