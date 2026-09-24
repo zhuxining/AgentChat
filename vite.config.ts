@@ -14,7 +14,7 @@ const ignorePatterns = [
   "**/out/**",
 ];
 
-export default defineConfig(async () => ({
+export default defineConfig(() => ({
   plugins: [react({ compiler: true }), tailwindcss()],
   lint: {
     ignorePatterns,
