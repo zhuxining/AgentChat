@@ -135,3 +135,17 @@ vpr tauri build     # 构建并打包桌面应用
 - 不提交无意生成的模板资源、调试输出、系统文件或本地 IDE 配置。
 - 使用 Conventional Commits：`feat`、`fix`、`refactor`、`docs`、`test`、`chore`，可使用 `frontend`、`tauri`、`ipc`、`ui` 等明确 scope。
 - 只修改和暂存当前任务文件，保留用户无关改动与既有暂存边界；未获明确请求不自动提交、不推送、不创建发布。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the single-context layout with root `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
