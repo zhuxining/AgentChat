@@ -1,0 +1,110 @@
+# 多端与 Relay
+
+> **Status**: active（多端设计基线，尚未实现）；Relay 部署和密码学协议为 proposed。参考 Lorca 的 Device Core、加密同步与指定 Runner 路由，不复制其执行系统。
+
+## 通信分工
+
+每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
+
+| 边界 | 方式与责任 |
+| --- | --- |
+| React ↔ 本机 Device Core | 类型化 Tauri IPC，提供操作、快照与订阅事件 |
+| 桌面 Device Core ↔ 承载进程 | 薄 API 适配，调用公开能力并读取视图；编码待验证 |
+| Device Core ↔ Relay | HTTPS 上传/拉取密文，WebSocket 通知变化与在线状态 |
+
+Relay 独立于桌面应用，可部署自有实例；托管地址和运营方式未确定。开发时局域网运行 Relay 不改变生产跨网络拓扑。Relay 保存密文同步记录、定向 Envelope/receipt、传输序号、配对邮箱、设备登记和在线状态；设备按持久化游标拉取，WS 只发变化提示，不承担完整数据传输或通知重放。
+
+首发需要认证与撤销、一次性配对、幂等上传、增量/分页拉取、定向路由、通知及有界保留。Relay 不持有 Harness、调用模型、访问 Runner 文件或调度 Task。APNs/FCM、附件服务、多副本和第三方 webhook 暂不纳入。
+
+## Identity、配对与撤销
+
+采用共同 Identity 与独立设备密钥的信任分层。初始设备建立 Identity，新设备通过配对字符串/二维码携带 Identity 公钥、Relay 地址和临时握手信息加入。Relay 配对邮箱只转送加密请求与回复，配对发起端验证并授权新设备。
+
+各 Device 持有自己的签名与加密身份，已授权设备获得读取共享 Projection 所需密钥。身份密钥使用平台安全存储；手机获得聊天同步与请求权限，不获得 Provider 密钥、Runner Storage 或执行环境。
+
+密钥派生、AEAD、签名域分离、授权链、恢复和轮换必须使用审查过的标准方案与库，完成专项协议设计。本文规定职责和信任目标，不指定未选定的密码学依赖。
+
+Relay 验证设备认证并限制可见范围；Runner 仍独立验证定向请求，不依赖 Relay 断言身份。撤销设备需关闭其 Relay 连接、拒绝新认证并同步撤销状态，Runner 在接纳前检查。已接纳工作不因设备断线或撤销隐式停止，需使用显式控制。
+
+旧密钥不能收回，后续数据隔离需要轮换；被复制的历史无法撤回。Identity 恢复不同于 Harness 恢复，换机不能使两个 Runner 同时接管一份执行 Storage，首发不设计自动故障转移。
+
+## 操作信封与接纳
+
+Request Envelope 是应用类型，携带协议版本、Identity、来源/目标 Device、稳定操作 ID、操作类型、创建时间和内容。发送方签名覆盖完整操作并绑定接收 Runner，内容加密给接收方；具体编码、有效期和密码学协议待验证。
+
+首发操作为创建 Conversation、提交输入、查询接纳结果、撤回、停止、工作目标更新，以及所属 Bot 的编辑和归档。Provider 凭据管理保留桌面入口，不暴露任意远程文件、Shell、invoke 或 Document 写入接口。
+
+Runner 校验签名、发送者授权与撤销状态、接收者、Conversation 归属、协议版本、操作范围和重放规则。能解密不代表 payload 的来源字段可信。receipt 必须由原目标 Runner 签发，客户端核验来源和关联 ID。
+
+Envelope/receipt 重投递复用原操作 ID。输入 ID 与来源 Device 一起确定同一 Conversation 的稳定 requestId，本地和远程入口均遵守该规则，重试保持内容不变。网络层校验同一操作的来源与内容，Relay 幂等上传；执行接纳和去重直接使用 Conversation.submit，不另建 admission engine。
+
+Runner 将校验后的输入交给 submit，取得已有或新 Submission，并返回 Submission ID 和真实结果。若接纳成功但确认尚未保存就崩溃，以原 requestId 再次调用找回已有 Submission，补发确认；有已知 Submission ID 时可查询库状态。网络 receipt 不成为另一份执行结算事实源。
+
+submit 的去重不覆盖任意 Bot 修改、configure 或目标更新。这些应用操作通过公开 Document/Commit 做业务版本校验，具体重试契约需验证；无法安全支持时限制操作范围，不增加通用接纳/恢复协调器。
+
+## 传输状态与控制边界
+
+UI 区分本机保存待上传、Relay 已存储等待 Runner、已接纳以及明确拒绝。只有 Runner 返回 Submission ID 或权威视图关联后，输入才称为 Submission；Relay receipt 不是 Agent 已运行或已回答的证明。
+
+Outbox 在上传失败时持久化重试。客户端乐观输入行按来源操作 ID 与对应 Entry 合并，避免重复显示；同一 Conversation 的多端输入按库的接纳与 inbox 规则处理，不依赖设备时钟推断执行顺序。
+
+尚未上传的本机输入可直接移除；已接纳输入使用 Submission.abort 或 Conversation.abort，具体作用范围见[执行控制](01-pi-durable.md#submission排队与控制)。输入一旦上传，取消送达、迟到停止和特定旧 Run 的作用边界需验证后开放，Runner 离线时不宣称停止生效。
+
+网络超时不能推断操作未执行，不在自动重试中盲目 abort 新工作，不承诺跨网络回滚或自建取消状态机。
+
+## Projection 与应用存储
+
+| 数据 | 用途与权威边界 |
+| --- | --- |
+| Identity、Device 身份与 Relay 连接信息 | 应用通信身份与连接状态 |
+| 本地 Projection | 所属 Runner 权威状态的可重建展示数据 |
+| 本机 Outbox | 待上传数据与尚未送达的操作，不替代 pi.inbox |
+| 拉取游标 | Relay 传输进度，不代表 Harness 执行进度 |
+| Relay 密文记录与定向消息 | 同步和投递存储，不作为执行 Storage |
+
+Runner 从已提交 Conversation、Document 和 Task 视图生成 Projection，携带 Runner/Conversation 标识和稳定 Entry ID。同步支持快照或增量 upsert；可变状态需经过验证的应用版本语义，客户端拒绝旧状态覆盖新状态。删除/归档用 tombstone，不根据记录消失猜测。
+
+Relay 传输序号、应用 Projection 版本与 Harness 内部提交顺序是不同概念；不假定库公开了源 Commit 序号，也不依赖设备时钟排序。Entry 内容不可变，同步记录可以重复投递或重新打包；状态对账的来源与版本契约仍需验证。
+
+pi.live 等可变状态可合并后导出，文本更新节流，Run 结束发布终态。Task Graph 仅同步存活状态摘要，不能供客户端恢复 Task 或作为完整历史；历史 Entry 按需分页。网络只传必要展示内容，不转发完整 Chord 对象、Provider 凭据、内部 Task 文档或原始诊断；必要展示字段由 Projection 适配选择。
+
+Device 按页保存 Projection 并推进游标，两者的原子性属于应用存储。客户端不能将本地旧 Projection 写回覆盖 Harness；Bot 与工作目标变更仍发给所属 Runner。
+
+Harness Commit 与 Device Store/Outbox 写入不在同一事务。首选公开 viewState/watch、Document 状态和公开查询生成快照，断线或重启后重新对账，必要时获取历史 Entry。watch 和 subscribeCommits 只是在线通知，不是可回放的执行日志；具体回调约束见[公开状态](01-pi-durable.md#公开状态与展示)。
+
+不通过私有接口插入导出记录，不包装全部 Storage Commit 建应用执行日志，不预建持久化导出状态机。若完整状态补齐无法使用公开 API 达成，应查上游能力、专项验证或缩小发布承诺，不能声称 watch 会补齐遗漏的全部 Commit。
+
+## 离线、保留与失败处理
+
+Device 断网时仍可阅读已下载历史，输入保存在本机 Outbox；未同步内容不可假装可用。Relay 可达而 Runner 离线时，客户端可同步历史并保存待执行请求，等待 Runner 上线接纳。
+
+桌面关闭窗口退出后停止 Runner，Relay 和其他 Device 继续存在；重启恢复已接纳工作并接收待投递请求。手机退出或退到后台仅影响自身同步，不取消已接纳工作；回到前台主动恢复上传、拉取与设备状态，不承诺后台常驻或首发推送。
+
+在线状态只表示同步连接，执行 readiness 单独发布。旧“运行中”Projection 必须附同步时间和来源 Runner 状态，不能当作当前存活证明。
+
+上传重试需退避，通知可合并，定向信封消费后确认。设备重连重新认证并拉取数据，不依赖丢失的 WS 通知。Relay 重启应保留已确认的数据；具体数据库、文件存储、备份与协议升级方式待验证。
+
+订阅和桥接缓冲有界，慢客户端重新取快照，不阻塞 Harness 或承载进程读取。网络 Outbox 可合并可变状态 Projection，不记录另一套执行历史；UI 卸载清理本地订阅。
+
+到期或配额拒绝应反馈，不承诺无限保存。请求有效期、去重保留期、tombstone、游标和分页策略需协调，避免去重过期后重新接受旧请求或慢设备恢复旧状态；具体限额与保留值待验证。
+
+## 信任边界
+
+共享聊天与配置 Projection 在设备端加密；定向操作和结果由发送方签名、接收方解密校验。Provider 密钥仅留在 Runner 的安全存储，不进入 Relay 或手机。
+
+Relay 可见密文大小、记录类型、路由、序号和在线状态，能够延迟或拒绝投递；端到端加密不保证可用性，也不能替代来源、版本、重放与撤销校验。设备认证和请求授权是必要应用边界，与是否增加逐 Bot 工具审批无关。
+
+## 待验证与验收
+
+先完成 Tauri 移动端共享核心、IPC 编码、跨网络 HTTP/WS、Relay 部署、密码学协议与密钥恢复/轮换验证。多端功能是应用目标，不是 pi-durable 已提供的产品能力。
+
+验收覆盖：
+
+- 桌面与手机共享同一 Conversation；Runner 离线、Device 断网及 Relay 重启后恢复同步和投递。
+- 重复 Envelope、响应丢失与接纳后崩溃均复用 requestId，不重复成为 Submission；Bot 等修改另验版本与重试契约。
+- 公开快照补齐遗漏状态，旧 Projection、归档、分页和游标处理正确；慢消费者不阻塞执行。
+- 未授权设备、错误签名/目标、旧请求重放和撤销被拒绝，密钥轮换边界明确，Projection 不含凭据或执行内部数据。
+- 传输等待、Submission 与拒绝状态真实；迟到控制请求不误作用于新工作，未验证能力不列为已支持。
+- 配额、到期、去重保留及通知丢失可观察；手机前台恢复与 UI 卸载在真机验证。
+
+执行恢复与 replay 的验收集中于[pi-durable 篇](01-pi-durable.md#验证与依据)，不以网络同步验证替代。
