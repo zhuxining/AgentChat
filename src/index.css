@@ -178,6 +178,9 @@
   body,
   #root {
     height: 100%;
+    /* 桌面外壳锁死视口：溢出只在各自面板内部滚动，不整体拖动页面。 */
+    overflow: hidden;
+    overscroll-behavior: none;
   }
 
   html {

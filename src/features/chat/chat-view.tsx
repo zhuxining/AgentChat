@@ -67,7 +67,7 @@ export function ChatView({ botId }: { botId: string }) {
   const model =
     selection.snapshot?.conversation.agent.model?.modelId ?? selection.activeBot?.model.modelId;
   return (
-    <section aria-label="聊天内容" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label="聊天内容" className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
         <Button
           aria-label="返回 Bot 列表"

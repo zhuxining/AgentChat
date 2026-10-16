@@ -85,21 +85,36 @@ function WorkspaceShell() {
       <ResizablePanelGroup>
         {!settingsMatch && (
           <>
-            <ResizablePanel id="bots" defaultSize={260} minSize={200} maxSize={420}>
-              <aside aria-label="Bot 列表" className="bg-sidebar flex h-full min-h-0 flex-col">
+            <ResizablePanel
+              id="bots"
+              defaultSize={260}
+              minSize={200}
+              maxSize={420}
+              className="overflow-hidden"
+            >
+              <aside
+                aria-label="Bot 列表"
+                className="bg-sidebar flex h-full min-h-0 flex-col overflow-hidden"
+              >
                 {botList}
               </aside>
             </ResizablePanel>
             <ResizableHandle withHandle />
           </>
         )}
-        <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col">
+        <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col overflow-hidden">
           <Outlet />
         </ResizablePanel>
         {chatMatch && !newBotMatch && detailsOpen && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel id="details" defaultSize={340} minSize={260} maxSize={560}>
+            <ResizablePanel
+              id="details"
+              defaultSize={340}
+              minSize={260}
+              maxSize={560}
+              className="overflow-hidden"
+            >
               <BotDetailsPane />
             </ResizablePanel>
           </>
@@ -155,7 +170,7 @@ function BotsIndexPage() {
   return (
     <>
       {!isDesktop && (
-        <section aria-label="Bot 列表页" className="bg-sidebar flex min-h-0 flex-1 flex-col">
+        <section aria-label="Bot 列表页" className="bg-sidebar flex h-full min-h-0 flex-1 flex-col">
           <BotList
             bots={workspace.catalog.bots}
             selectedBotId={workspace.selection.selectedBotId}
@@ -172,7 +187,7 @@ function BotsIndexPage() {
         </section>
       )}
       {isDesktop && (
-        <section aria-label="选择 Bot" className="flex min-h-0 min-w-0 flex-1">
+        <section aria-label="选择 Bot" className="flex h-full min-h-0 min-w-0 flex-1">
           <Empty className="min-h-64">
             <EmptyHeader>
               <EmptyMedia variant="icon">

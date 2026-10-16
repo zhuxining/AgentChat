@@ -7,7 +7,7 @@ import { BotDetailsView } from "@/features/bots/bot-details-view";
 export function BotDetailsPage({ botId }: { botId: string }) {
   const navigate = useNavigate();
   return (
-    <section aria-label="Bot 详情" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label="Bot 详情" className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
         <Button
           aria-label="返回聊天"
