@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
-    "build": "tsc --noEmit && vp build && bun run --cwd runner typecheck && bun run --cwd runner build && bun run --cwd runner stage-runtime",
+    "build": "tsc --noEmit && vp build && bun run --cwd runner typecheck && bun run --cwd runner build",
     "preview": "vp preview",
     "check": "vp check --fix && cargo fmt --manifest-path src-tauri/Cargo.toml --check && bun run --cwd runner typecheck",
     "tauri": "tauri",

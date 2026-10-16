@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export type RuntimeStatus = {
+  status: "ready" | "missing" | "incompatible" | "error";
+  path: string | null;
+  version: string | null;
+  source: "configured" | "path" | "system" | "managed" | null;
+  architecture: string | null;
+  detail: string | null;
+};
+
 export type Bot = {
   id: string;
   name: string;
@@ -118,6 +127,8 @@ async function request<T>(message: RunnerRequest): Promise<T> {
 }
 
 export const runnerClient = {
+  runtimeStatus: () => invoke<RuntimeStatus>("runtime_status"),
+  installRuntime: () => invoke<RuntimeStatus>("install_runtime"),
   initialize: () => request<InitializeResult>({ op: "initialize" }),
   reloadConfiguration: () => request<InitializeResult>({ op: "reloadConfiguration" }),
   readConfiguration: (path: string) =>
@@ -150,6 +161,7 @@ export const runnerClient = {
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
   setProviderCredential: (apiKey: string | null) =>
     invoke<{ configured: boolean; runnerUpdated: boolean }>("set_provider_credential", { apiKey }),
+  startRunner: () => invoke<void>("start_runner"),
   stopRunner: () => invoke<void>("stop_runner"),
   restartRunner: () => invoke<void>("restart_runner"),
 };

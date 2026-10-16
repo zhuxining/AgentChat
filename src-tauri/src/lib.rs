@@ -6,6 +6,8 @@ mod credentials;
 mod host;
 #[cfg(desktop)]
 mod runner;
+#[cfg(desktop)]
+mod runtime;
 
 #[cfg(desktop)]
 use tauri::Manager;
@@ -48,15 +50,14 @@ pub fn run() {
             commands::runner_request,
             commands::set_provider_credential,
             commands::restart_runner,
-            commands::stop_runner
+            commands::start_runner,
+            commands::stop_runner,
+            commands::runtime_status,
+            commands::install_runtime
         ])
         .setup(|app| {
             let data_dir = host::data_dir().map_err(std::io::Error::other)?;
             let connection = host::RunnerConnection::new(data_dir, app.path().resource_dir()?);
-            // Startup failure remains repairable through restart_runner; UI still opens.
-            if let Err(error) = connection.start() {
-                eprintln!("{error}");
-            }
             app.manage(connection);
             Ok(())
         });

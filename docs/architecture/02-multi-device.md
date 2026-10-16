@@ -4,7 +4,7 @@
 
 ## 通信分工
 
-目标是每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。Runner 是独立后台执行宿主，不再定义为某台 Device；当前 Unix 本机 IPC 已实现，Windows 本机 IPC 尚未实现，Device Core 与后台的网络同步接入仍为后续设计。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
+目标是每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。Runner 是独立后台执行宿主，不再定义为某台 Device；当前 Unix socket 与 Windows named pipe IPC 均有实现，Windows 仍待目标平台验证。Device Core 与后台的网络同步接入仍为后续设计。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
 
 | 边界                      | 方式与责任                                            |
 | ------------------------- | ----------------------------------------------------- |

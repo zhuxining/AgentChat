@@ -308,17 +308,7 @@ impl RunnerProcess {
         std::fs::create_dir_all(data_dir)
             .map_err(|error| format!("创建 Runner 数据目录失败：{error}"))?;
         let entry = runner_entry(resource_dir)?;
-        let packaged_node = find_node_runtime(resource_dir.join("runner"));
-        let development_node =
-            find_node_runtime(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runner/runtime"));
-        let node = match std::env::var_os("AGENTCHAT_NODE") {
-            Some(node) => node.into(),
-            None => match packaged_node.or(development_node) {
-                Some(path) => path,
-                None if cfg!(debug_assertions) => "node".into(),
-                None => return Err("当前打包目标缺少随包 Node Runner runtime".to_owned()),
-            },
-        };
+        let node = crate::runtime::require_ready()?;
         let mut command = Command::new(node);
         command
             .arg(&entry)
@@ -529,12 +519,6 @@ impl RunnerProcess {
             }
         }
     }
-}
-
-fn find_node_runtime(directory: PathBuf) -> Option<PathBuf> {
-    [directory.join("node"), directory.join("node.exe")]
-        .into_iter()
-        .find(|candidate| candidate.is_file())
 }
 
 fn runner_entry(resource_dir: &Path) -> Result<PathBuf, String> {

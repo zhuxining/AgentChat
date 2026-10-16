@@ -5,6 +5,7 @@ import { platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 
 import { createAppRouter } from "@/app/router";
+import { RuntimeGate } from "@/app/runtime-gate";
 import { WorkspaceProvider } from "@/app/workspace-provider";
 import { WorkspaceUiProvider } from "@/app/workspace-ui";
 
@@ -45,10 +46,12 @@ export default function App() {
   }, []);
 
   return (
-    <WorkspaceProvider>
-      <WorkspaceUiProvider>
-        <RouterProvider router={router} />
-      </WorkspaceUiProvider>
-    </WorkspaceProvider>
+    <RuntimeGate>
+      <WorkspaceProvider>
+        <WorkspaceUiProvider>
+          <RouterProvider router={router} />
+        </WorkspaceUiProvider>
+      </WorkspaceProvider>
+    </RuntimeGate>
   );
 }

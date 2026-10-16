@@ -24,7 +24,7 @@
 ├─ workspaces/<bot-id>/
 ├─ state/runner.sqlite
 ├─ logs/host.log
-└─ run/                       # 本机连接与实例锁
+└─ run/                       # Unix socket 与实例锁；Windows 使用命名管道
 ```
 
 首次初始化生成默认 Runner 配置；已有无效文件不覆盖，初始化后的文件缺失按错误处理。JSON 文件是期望配置的权威来源；数据库仅保存执行事实和已确定的执行配置，不再持有另一份权威 Bot 默认配置。
@@ -162,7 +162,7 @@ UI 版本来自文件内容；Bot 配置版本包含所引用指令文件内容�
 
 Document 是类型化持久状态，不是配置目录中的普通文档。应用状态与扩展状态使用 `defineDoc`，通过公开 Commit/tx 修改；目标由用户确认，Submission done 或 Task completed 不代表目标完成。Bot 默认值不再使用应用 Document 作为另一份事实源。
 
-一份 Storage 只由一个 Harness/进程持有。Rust、UI、手机和 Relay 不打开内部表，也不复制检查点执行工作。生产使用 `openNodeSqliteStorage` 和随包 Node 22.19.0；MemoryStorage 用于测试。SQLite 的崩溃与断电保证不同，不承诺断电零丢失。
+一份 Storage 只由一个 Harness/进程持有。Rust、UI、手机和 Relay 不打开内部表，也不复制检查点执行工作。生产使用 `openNodeSqliteStorage` 和经宿主验证的 Node 24+；MemoryStorage 用于测试。SQLite 的崩溃与断电保证不同，不承诺断电零丢失。
 
 ## Submission、排队与控制
 
@@ -201,11 +201,11 @@ watch/subscribeCommits 不构成可回放网络日志，不假定存在源 Commi
 
 ## 验证与依据
 
-配置与 Harness 测试覆盖重载、版本冲突、指令内容快照、Bot 缺失、模型/能力拒绝和 close/reopen/resume。原生宿主测试覆盖实例排他、连接关联、客户端断开后存活及 stop 仅调用 close。macOS 实际二进制还完成了八客户端请求、重复启动、外部编辑/重载、过期保存拒绝、停止与重开后快照保留；桌面实际读取配置和停止后台，并验证 UI 进程退出不停止后台、重新启动连接已有实例。打包后的 release `.app` 另在临时目录验证了随包 Node runtime 与入口、后台启动、Bot/会话创建、配置读取、UI 退出后后台存活与显式停止。
+配置与 Harness 测试覆盖重载、版本冲突、指令内容快照、Bot 缺失、模型/能力拒绝和 close/reopen/resume。原生宿主测试覆盖实例排他、连接关联、客户端断开后存活及 stop 仅调用 close。macOS 实际二进制还完成了八客户端请求、重复启动、外部编辑/重载、过期保存拒绝、停止与重开后快照保留；桌面实际读取配置和停止后台，并验证 UI 进程退出不停止后台、重新启动连接已有实例。当前版本不随包携带 Node；runtime 检测、包管理器安装、Node 官方源与 npmmirror 发行包回退已经实现，但新初始化与安装尚未在目标平台上冒烟。
 
 Tauri 打包的 JS/Rust 版本不匹配已修复：`Cargo.toml` 将每个有 JS 对应包的 crate 固定在相同 major.minor，`Cargo.lock` 必须一并保留（Tauri 打包依赖它，且 `tauri-plugin-updater` 的可选 `zip ^4` 已全部 yank，无法重新解析）。
 
-本轮未调用真实 Provider，也未验证有工具副作用的工作跨进程中断恢复。当前 Unix IPC 已实现，Windows IPC 未实现，其他平台未完成打包验收。Device Core、Relay 和移动端可靠性仍是后续范围。
+本轮未调用真实 Provider，也未验证有工具副作用的工作跨进程中断恢复。Unix socket 和 Windows named pipe IPC 均已实现；Windows 管道拒绝远程客户端，并通过 ACL 限制为当前所有者、SYSTEM 与管理员。`host.rs` 的 Windows 生命周期分支与 `host/windows.rs` 在最小 Tokio harness（stub Runner）上通过 `x86_64-pc-windows-gnu` 编译，但完整 Tauri 应用交叉编译因开发机缺少 MinGW 编译器而未完成，Windows 尚无运行验证。Linux 与其他平台未完成安装/打包验收。Device Core、Relay 和移动端可靠性仍是后续范围。
 
 - [官方 README](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md)
 - [官方 spec](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md)

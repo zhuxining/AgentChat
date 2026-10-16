@@ -1,9 +1,11 @@
 //! The UI owns a connection address; the independent host owns Node and credentials.
-use crate::runner::{RunnerReply, RunnerRequest};
+use crate::runner::{RunnerProcess, RunnerReply, RunnerRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -36,6 +38,88 @@ struct ResponseFrame {
     result: Result<Value, String>,
 }
 
+struct HostState {
+    process: Result<RunnerProcess, String>,
+    warning: Mutex<Option<String>>,
+    stopping: AtomicBool,
+    credential_gate: Mutex<()>,
+}
+
+impl HostState {
+    fn new(process: Result<RunnerProcess, String>, warning: Option<String>) -> Self {
+        Self {
+            process,
+            warning: Mutex::new(warning),
+            stopping: AtomicBool::new(false),
+            credential_gate: Mutex::new(()),
+        }
+    }
+
+    fn handle(&self, request: HostRequest) -> Result<Value, String> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("Runner 正在停止".to_owned());
+        }
+        match request {
+            HostRequest::Ping => Ok(Value::Bool(true)),
+            HostRequest::Stop => {
+                if self.stopping.swap(true, Ordering::AcqRel) {
+                    return Err("Runner 正在停止".to_owned());
+                }
+                if let Ok(process) = &self.process {
+                    process.shutdown();
+                }
+                Ok(Value::Null)
+            }
+            HostRequest::Runner { request } => {
+                validate_public_request(&request)?;
+                let initialize = matches!(*request, RunnerRequest::Initialize);
+                let mut reply = self
+                    .process
+                    .as_ref()
+                    .map_err(Clone::clone)?
+                    .request(*request)?;
+                if initialize {
+                    if let Some(warning) =
+                        self.warning.lock().map_err(|_| "凭据状态不可用")?.as_ref()
+                    {
+                        if let Value::Object(result) = &mut reply.result {
+                            result.insert(
+                                "credentialWarning".to_owned(),
+                                Value::String(warning.clone()),
+                            );
+                        }
+                    }
+                }
+                Ok(reply.result)
+            }
+            HostRequest::SetCredential { api_key } => {
+                let _gate = self.credential_gate.lock().map_err(|_| "凭据状态不可用")?;
+                let api_key = api_key
+                    .map(|key| key.trim().to_owned())
+                    .filter(|key| !key.is_empty());
+                if api_key.as_ref().is_some_and(|key| key.len() > 8_000) {
+                    return Err("Provider 凭据过长".to_owned());
+                }
+                crate::credentials::write_deepseek_api_key(api_key.as_deref())?;
+                *self.warning.lock().map_err(|_| "凭据状态不可用")? = None;
+                let key = api_key.or_else(|| std::env::var("DEEPSEEK_API_KEY").ok());
+                let configured = key.is_some();
+                let updated = self
+                    .process
+                    .as_ref()
+                    .ok()
+                    .and_then(|process| {
+                        process
+                            .request(RunnerRequest::SetProviderCredential { api_key: key })
+                            .ok()
+                    })
+                    .is_some();
+                Ok(serde_json::json!({ "configured": configured, "runnerUpdated": updated }))
+            }
+        }
+    }
+}
+
 impl RunnerConnection {
     pub fn new(data_dir: PathBuf, resource_dir: PathBuf) -> Self {
         Self {
@@ -45,6 +129,7 @@ impl RunnerConnection {
     }
 
     pub fn start(&self) -> Result<(), String> {
+        crate::runtime::require_ready()?;
         #[cfg(unix)]
         {
             unix::prepare_run_dir(&self.data_dir)?;
@@ -61,7 +146,34 @@ impl RunnerConnection {
             }
             Err("后台 Runner 未能启动，请检查 logs/host.log".to_owned())
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            std::fs::create_dir_all(self.data_dir.join("run"))
+                .map_err(|error| format!("创建 Runner 目录失败：{error}"))?;
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                match windows::status(&self.data_dir)? {
+                    windows::HostStatus::Ready => return Ok(()),
+                    windows::HostStatus::Missing => break,
+                    windows::HostStatus::Stopping if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    windows::HostStatus::Stopping => {
+                        return Err("现有后台 Runner 仍在停止".to_owned());
+                    }
+                }
+            }
+            self.spawn_host()?;
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if windows::status(&self.data_dir)? == windows::HostStatus::Ready {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            return Err("后台 Runner 未能启动，请检查 logs/host.log".to_owned());
+        }
+        #[cfg(not(any(unix, windows)))]
         Err("当前平台尚未实现受限本机 IPC；Runner 不会开放网络端口".to_owned())
     }
 
@@ -103,12 +215,49 @@ impl RunnerConnection {
         Ok(())
     }
 
+    #[cfg(windows)]
+    fn spawn_host(&self) -> Result<(), String> {
+        let logs = self.data_dir.join("logs");
+        std::fs::create_dir_all(&logs)
+            .map_err(|error| format!("创建 Runner 日志目录失败：{error}"))?;
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(logs.join("host.log"))
+            .map_err(|error| format!("打开 Runner 日志失败：{error}"))?;
+        let log_error = log.try_clone().map_err(|error| error.to_string())?;
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let mut command = Command::new(executable);
+        command
+            .arg("--runner-host")
+            .arg("--data-dir")
+            .arg(&self.data_dir)
+            .arg("--resource-dir")
+            .arg(&self.resource_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_error));
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("启动后台 Runner 失败：{error}"))?;
+        thread::spawn(move || {
+            if let Err(error) = child.wait() {
+                eprintln!("等待后台 Runner 失败：{error}");
+            }
+        });
+        Ok(())
+    }
+
     fn send(&self, request: HostRequest) -> Result<Value, String> {
         #[cfg(unix)]
         {
             unix::send(&self.data_dir, request)
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            windows::send(&self.data_dir, request)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = request;
             Err("当前平台尚未实现受限本机 IPC".to_owned())
@@ -128,9 +277,9 @@ impl RunnerConnection {
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        self.send(HostRequest::Stop)?;
         #[cfg(unix)]
         {
+            self.send(HostRequest::Stop)?;
             let deadline = Instant::now() + Duration::from_secs(15);
             while Instant::now() < deadline {
                 if !unix::instance_running(&self.data_dir)? {
@@ -140,13 +289,35 @@ impl RunnerConnection {
             }
             Err("后台 Runner 收尾超时".to_owned())
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            match windows::status(&self.data_dir)? {
+                windows::HostStatus::Missing => return Ok(()),
+                windows::HostStatus::Stopping => {}
+                windows::HostStatus::Ready => {
+                    self.send(HostRequest::Stop)?;
+                }
+            }
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                if windows::status(&self.data_dir)? == windows::HostStatus::Missing {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err("后台 Runner 收尾超时".to_owned())
+        }
+        #[cfg(not(any(unix, windows)))]
         Ok(())
     }
 
     pub fn restart(&self) -> Result<(), String> {
         #[cfg(unix)]
         if unix::instance_running(&self.data_dir)? {
+            self.stop()?;
+        }
+        #[cfg(windows)]
+        if windows::status(&self.data_dir)? != windows::HostStatus::Missing {
             self.stop()?;
         }
         self.start()
@@ -206,27 +377,40 @@ fn run_host(data_dir: &Path, resource_dir: &Path) -> Result<(), String> {
         };
         let (api_key, warning) = crate::credentials::effective_deepseek_api_key();
         let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, api_key);
-        unix::serve(instance, unix::HostState::new(process, warning))
+        unix::serve(instance, HostState::new(process, warning))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let Some(instance) = windows::Instance::bind(data_dir)? else {
+            return Ok(());
+        };
+        let (api_key, warning) = crate::credentials::effective_deepseek_api_key();
+        let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, api_key);
+        windows::serve(instance, HostState::new(process, warning))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (data_dir, resource_dir);
         Err("当前平台尚未实现受限本机 IPC".to_owned())
     }
 }
 
+#[cfg(windows)]
+#[path = "host/windows.rs"]
+mod windows;
+
 #[cfg(unix)]
 mod unix {
     use super::*;
-    use crate::runner::{read_bounded_line, RunnerProcess};
+    use crate::runner::read_bounded_line;
     use std::fs::{File, OpenOptions};
     use std::io::{BufReader, Write};
     use std::os::unix::fs::{
         DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt,
     };
     use std::os::unix::net::{UnixListener, UnixStream};
-    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     const MAX_MESSAGE: usize = 1_048_576;
     const MAX_CLIENTS: usize = 32;
@@ -419,88 +603,6 @@ mod unix {
             return Err("宿主响应 ID 不匹配".to_owned());
         }
         response.result
-    }
-
-    pub(super) struct HostState {
-        process: Result<RunnerProcess, String>,
-        warning: Mutex<Option<String>>,
-        stopping: AtomicBool,
-        credential_gate: Mutex<()>,
-    }
-
-    impl HostState {
-        pub(super) fn new(process: Result<RunnerProcess, String>, warning: Option<String>) -> Self {
-            Self {
-                process,
-                warning: Mutex::new(warning),
-                stopping: AtomicBool::new(false),
-                credential_gate: Mutex::new(()),
-            }
-        }
-
-        fn handle(&self, request: HostRequest) -> Result<Value, String> {
-            if self.stopping.load(Ordering::Acquire) {
-                return Err("Runner 正在停止".to_owned());
-            }
-            match request {
-                HostRequest::Ping => Ok(Value::Bool(true)),
-                HostRequest::Stop => {
-                    if self.stopping.swap(true, Ordering::AcqRel) {
-                        return Err("Runner 正在停止".to_owned());
-                    }
-                    if let Ok(process) = &self.process {
-                        process.shutdown();
-                    }
-                    Ok(Value::Null)
-                }
-                HostRequest::Runner { request } => {
-                    validate_public_request(&request)?;
-                    let initialize = matches!(*request, RunnerRequest::Initialize);
-                    let mut reply = self
-                        .process
-                        .as_ref()
-                        .map_err(Clone::clone)?
-                        .request(*request)?;
-                    if initialize {
-                        if let Some(warning) =
-                            self.warning.lock().map_err(|_| "凭据状态不可用")?.as_ref()
-                        {
-                            if let Value::Object(result) = &mut reply.result {
-                                result.insert(
-                                    "credentialWarning".to_owned(),
-                                    Value::String(warning.clone()),
-                                );
-                            }
-                        }
-                    }
-                    Ok(reply.result)
-                }
-                HostRequest::SetCredential { api_key } => {
-                    let _gate = self.credential_gate.lock().map_err(|_| "凭据状态不可用")?;
-                    let api_key = api_key
-                        .map(|key| key.trim().to_owned())
-                        .filter(|key| !key.is_empty());
-                    if api_key.as_ref().is_some_and(|key| key.len() > 8_000) {
-                        return Err("Provider 凭据过长".to_owned());
-                    }
-                    crate::credentials::write_deepseek_api_key(api_key.as_deref())?;
-                    *self.warning.lock().map_err(|_| "凭据状态不可用")? = None;
-                    let key = api_key.or_else(|| std::env::var("DEEPSEEK_API_KEY").ok());
-                    let configured = key.is_some();
-                    let updated = self
-                        .process
-                        .as_ref()
-                        .ok()
-                        .and_then(|process| {
-                            process
-                                .request(RunnerRequest::SetProviderCredential { api_key: key })
-                                .ok()
-                        })
-                        .is_some();
-                    Ok(serde_json::json!({ "configured": configured, "runnerUpdated": updated }))
-                }
-            }
-        }
     }
 
     pub(super) fn serve(instance: Instance, state: HostState) -> Result<(), String> {

@@ -77,13 +77,6 @@
         "typescript": "^7.0.2",
         "vite-plus": "^1.1.0",
       },
-      "optionalDependencies": {
-        "node-bin-darwin-arm64": "22.19.0",
-        "node-darwin-x64": "22.19.0",
-        "node-linux-arm64": "22.19.0",
-        "node-linux-x64": "22.19.0",
-        "node-win-x64": "22.19.0",
-      },
     },
   },
   "packages": {
@@ -1441,21 +1434,11 @@
 
     "negotiator": ["negotiator@1.1.0", "", { "dependencies": { "content-type": "^2.1.0" } }, "sha512-NMPBRMJgiQHjbd8phG3Vebdx4kZ1H121rbl5IkMqeOsahptB9BKo/d7oJ3zTXqTgagn2bWlNSXkh0QUGM31RYg=="],
 
-    "node-bin-darwin-arm64": ["node-bin-darwin-arm64@22.19.0", "", { "os": "darwin", "cpu": "arm64", "bin": { "node": "bin/node" } }, "sha512-I+vzkiYsQ3Kkv1i69rQ0e9o8T1sRl0jKhOeGyBM3FQc3OSIxETP1//G/GH4ivXrEU8aeX/YcP+gY5hQX8UaAvA=="],
-
-    "node-darwin-x64": ["node-darwin-x64@22.19.0", "", { "os": "darwin", "cpu": "x64", "bin": { "node": "bin/node" } }, "sha512-yuoD2zhv2qbqNp3xdYmLxkbh0CkuPSo2X9lwpnBhGjjUJgNZiu5sH75eSRmwGbpqqdntFTKMIKZKdmlE5mmh6w=="],
-
     "node-domexception": ["node-domexception@1.0.0", "", {}, "sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ=="],
 
     "node-fetch": ["node-fetch@3.3.2", "", { "dependencies": { "data-uri-to-buffer": "^4.0.0", "fetch-blob": "^3.1.4", "formdata-polyfill": "^4.0.10" } }, "sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA=="],
 
-    "node-linux-arm64": ["node-linux-arm64@22.19.0", "", { "os": "linux", "cpu": "arm64", "bin": { "node": "bin/node" } }, "sha512-cYjisB4a9etCVWH8g+vV1MrHKBhlLLeB+J0w4TjOxODKgBwtwhTgNSnftU+LJESUWkcn2EwG4GcLRdX8QbMSow=="],
-
-    "node-linux-x64": ["node-linux-x64@22.19.0", "", { "os": "linux", "cpu": "x64", "bin": { "node": "bin/node" } }, "sha512-kjgmAijr2xPcEIrK1eky8L05W9pZcVUYihQbsN99F0zQP6VXX+DlAbSFbVre3bI7oLjtyUd10/vCdCkxfqnysw=="],
-
     "node-releases": ["node-releases@2.0.59", "", {}, "sha512-5qr2okC4ItAI0hG5SaV0HoYMpnM/Y6+Oqr7AmPYy/2uEoGvS+GbSKLeRxSS1uAdu59yz0ouzcuXievSgg///WA=="],
-
-    "node-win-x64": ["node-win-x64@22.19.0", "", { "os": "win32", "cpu": "x64", "bin": { "node": "bin/node.exe" } }, "sha512-q1owI2Jrs2dh8IShkzlP6ZoyCGmHA4LK/jKS8d0xJ9u4B489e3ZEOU8BgTtrmba0MPPhMZf3JfR54Z8QZX/YmA=="],
 
     "npm-run-path": ["npm-run-path@6.0.0", "https://registry.npmmirror.com/npm-run-path/-/npm-run-path-6.0.0.tgz", { "dependencies": { "path-key": "^4.0.0", "unicorn-magic": "^0.3.0" } }, "sha512-9qny7Z9DsQU8Ou39ERsPU4OZQlSTP47ShQzuKZ6PRXpYLtIFgl/DEBYEXKlvcEa+9tHVcK8CF81Y2V72qaZhWA=="],
 

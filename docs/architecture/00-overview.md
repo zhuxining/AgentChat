@@ -1,6 +1,6 @@
 # AgentChat 架构总览
 
-> **Status**: active。独立后台宿主与文件配置已实现；macOS 已完成临时目录下的后台与桌面冒烟，多端、Device Core 与 Relay 尚未实现。Windows 本机 IPC 尚未实现。
+> **Status**: active。独立后台宿主、Node 24+ 初始化与配置文件已实现；macOS 已完成此前版本的后台和桌面临时目录冒烟。当前 Node 安装回退与 Windows named pipe IPC 尚未完成目标平台验收；多端、Device Core 与 Relay 尚未实现。
 
 ## 分工与依赖
 
@@ -44,7 +44,9 @@ src/
 src-tauri/src/
 ├─ lib.rs                      # UI/后台入口分流、Tauri 装配
 ├─ commands/mod.rs             # 前端 IPC 边界
-├─ host.rs                     # 独立后台宿主、当前 Unix socket
+├─ host.rs                     # 独立后台宿主、生命周期与 Unix socket
+├─ host/windows.rs             # Windows 命名管道、ACL 与帧传输
+├─ runtime.rs                  # Node 检测、包管理器与校验下载
 ├─ runner.rs                   # Node 子进程与私有 JSONL
 └─ credentials.rs              # 系统凭据访问
 runner/src/
@@ -58,9 +60,9 @@ runner/src/
 
 模型、工作区、能力注册和状态投影都属于 Harness 装配或使用。Extension 相关 Tool、section 和持久状态集中在对应能力模块；不为未来子 Agent、Skill/MCP 建空框架。第一阶段只使用随包能力，不纳入计划模式。
 
-根 React/Tauri package 与独立 `runner/` workspace 共用 `bun.lock`，Rust 继续由 Cargo 管理。Runner 采用 NodeNext 类型检查和随包 Node 22.19.0；前端与 Runner 不互相导入实现。根命令聚合构建与测试，详见 [README](../../README.md)。
+根 React/Tauri package 与独立 `runner/` workspace 共用 `bun.lock`，Rust 继续由 Cargo 管理。Runner 采用 NodeNext 类型检查，构建产物只包含 `entry.js`，不携带 Node。原生检测器检查 `AGENTCHAT_NODE`、GUI 进程 PATH、平台常见位置和 AgentChat 私有 runtime，验证稳定 Node 24+、`node:sqlite`、版本、架构与绝对路径。首次启动找不到合格 Node 时尝试系统包管理器；失败后从 Node 官方发行源、再从 npmmirror 镜像下载到 AgentChat 数据目录，不修改用户 PATH。根命令聚合构建与测试，详见 [README](../../README.md)。
 
-原生宿主将锁文件中已有的 `libc` 声明为 Unix 目标的直接依赖，用于独立进程会话、有效用户 ID 和非阻塞文件描述符等标准系统接口，替代外部 Shell 命令或额外进程管理依赖。它是 Rust 生态持续维护的基础系统绑定，不新增需要编译或分发的第三方原生库；少量 `unsafe` 调用集中在宿主与进程通信中，并以私有目录、实例锁和有界读写约束其使用。
+原生宿主将锁文件中已有的 `libc` 声明为 Unix 目标的直接依赖，用于独立进程会话、有效用户 ID 和非阻塞文件描述符等标准系统接口；Windows IPC 使用 Tokio named pipe，并为管道设置仅限当前所有者、SYSTEM 与管理员的 ACL。Node 发行包回退使用 `reqwest` 与 `sha2` 下载、校验和安装归档。没有新增需要随应用分发的 Node runtime；少量 `unsafe` 调用集中在 Unix 宿主与 Windows 安全描述符转换中，并以私有目录、实例锁和有界读写约束其使用。
 
 ## 数据所有权与生命周期
 
@@ -68,7 +70,7 @@ runner/src/
 
 默认数据根目录为 `~/.agentchat`，可用绝对路径 `AGENTCHAT_DATA_DIR` 覆盖，不做旧格式或目录迁移。工作区与配置、状态分开，同一 Bot 默认共享工作区，cwd 不提供隔离。密钥存储在系统安全设施，不写 JSON、工具环境或 Projection。
 
-UI 启动先连接已有 Runner，未运行再启动。Unix 实现使用当前用户权限保护 socket 和实例锁；一份 Storage 同时只有一个持有者。Windows 连接适配尚未实现，不回退为网络监听。后台停止调用 Harness.close 并收尾，保留恢复状态；取消工作独立调用。恢复重新装配 Registry 并调用库恢复能力，不从展示历史重发。
+UI 启动先探测 Node 24+。合格时复用；缺失时 macOS 通过 Terminal 引导 Homebrew bootstrap（TUNA、USTC、官方源）并安装 Node，Windows 使用 winget（缺少 App Installer 时打开 Microsoft Store），Linux 仅当 apt 候选版本达到 24 时安装。包管理器失败或安装后仍不合格时，下载官方 Node 发行包，再回退到 npmmirror Node 镜像，安装在 `~/.agentchat/runtimes/node-v24`，不修改用户 PATH，也不替换已有系统 Node。运行时就绪后，UI 先连接已有 Runner，未运行再启动；Unix IPC 使用当前用户权限保护的 socket 和实例锁，Windows IPC 使用拒绝远程连接的命名管道，ACL 限制为当前所有者、SYSTEM 与管理员。后台停止调用 Harness.close 并收尾，保留恢复状态。
 
 ## 多端规划
 
@@ -78,9 +80,9 @@ Relay 不运行 Harness、不读取工作区或执行 Storage；手机不取得 
 
 ## 验证边界与依据
 
-本地测试分布在 `tests/`、`runner/tests/` 和 Rust 模块内，覆盖 UI、配置、Harness 操作和宿主协议。macOS 已验证真实后台二进制的多客户端关联、单实例、配置重载、过期保存拒绝、显式停止和重开后的配置快照；桌面界面已验证配置读取、停止后台后 UI 保留，以及 UI 进程退出后后台存活和重新连接。未使用真实用户数据或调用真实模型。
+本地测试分布在 `tests/`、`runner/tests/` 和 Rust 模块内，覆盖 UI、配置、Harness 操作和宿主协议。此前 macOS 版本已验证真实后台二进制的多客户端关联、单实例、配置重载、过期保存拒绝、显式停止和重开后的配置快照；桌面界面已验证配置读取、停止后台后 UI 保留，以及 UI 进程退出后后台存活和重新连接。未使用真实用户数据或调用真实模型。
 
-前端与 Node 构建、Rust 构建可执行；Tauri 打包版本不匹配已修复（crate 与 `@tauri-apps/*` 包统一在同一 major.minor），macOS arm64 release `.app` 已完成构建并在临时目录通过打包产物冒烟（随包 Node 启动后台、创建 Bot 与会话、宿主读配置、UI 退出后后台存活、重连与显式停止）。桌面界面结构（Bot 列表、连续消息流、详情与配置编辑、设置分类、三栏／两栏切换）的验证与缺口见 [UI 结构](03-ui-structure.md)。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。Unix 实现不代表 Linux/所有 Unix 平台均已完成打包验收，Windows IPC 明确未实现。
+前端与 Runner JavaScript 构建、macOS Rust 检查通过。当前 Tauri 资源仅包含 `runner/entry.js`，不携带 Node；此前随包 Node 的 macOS release 冒烟属于历史验证。Node 下载索引与 checksum 路径已核实，但本次未执行下载、包管理器安装或新初始化流程的目标平台冒烟。Windows IPC（含 ACL 与停止状态处理）在隔离 Tokio harness 上通过 `x86_64-pc-windows-gnu` 编译；完整 Tauri Windows 交叉编译仍因缺少 MinGW 编译器未完成，Windows 运行验证仍缺。桌面界面结构及验证范围见 [UI 结构](03-ui-structure.md)。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。
 
 多端、Relay、共享契约生成和移动端不列为已实现。库 API 为实验性，具体行为以锁定版本类型和源码为准。
 

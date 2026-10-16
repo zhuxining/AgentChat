@@ -4,6 +4,18 @@ use serde_json::Value;
 use tauri::State;
 
 #[tauri::command]
+pub fn runtime_status() -> crate::runtime::RuntimeStatus {
+    crate::runtime::detect()
+}
+
+#[tauri::command]
+pub async fn install_runtime() -> Result<crate::runtime::RuntimeStatus, String> {
+    tauri::async_runtime::spawn_blocking(crate::runtime::install)
+        .await
+        .map_err(|error| format!("Node 安装任务失败：{error}"))?
+}
+
+#[tauri::command]
 pub async fn runner_request(
     runner: State<'_, RunnerConnection>,
     request: RunnerRequest,
@@ -23,6 +35,14 @@ pub async fn set_provider_credential(
     tauri::async_runtime::spawn_blocking(move || runner.set_credential(api_key))
         .await
         .map_err(|error| format!("Runner 凭据任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn start_runner(runner: State<'_, RunnerConnection>) -> Result<(), String> {
+    let runner = runner.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runner.start())
+        .await
+        .map_err(|error| format!("Runner 启动任务失败：{error}"))?
 }
 
 #[tauri::command]
