@@ -2,90 +2,33 @@ import { useState } from "react";
 
 import type { Bot, BotDefaults, BotDraft, RunnerCapabilities } from "@/app/runner-client";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { initializeBotDraft } from "@/features/chat/bot-draft";
+import { initializeBotDraft } from "@/features/bots/bot-draft";
 
 type Props = {
-  open: boolean;
   bot: Bot | null;
   capabilities: RunnerCapabilities;
   defaults: BotDefaults;
   busy: boolean;
   error: string;
-  onOpenChange: (open: boolean) => void;
-  onSave: (draft: BotDraft) => Promise<boolean>;
-  onArchive: (bot: Bot) => Promise<boolean>;
+  onSubmit: (draft: BotDraft) => void | Promise<void>;
+  onCancel: () => void;
+  onArchive?: () => void;
 };
 
-export function BotEditorDialog({
-  open,
+// New and edit share field layout, capability gating and validation; their initial values
+// and submit semantics stay with the page that owns the flow.
+export function BotConfigForm({
   bot,
   capabilities,
   defaults,
   busy,
   error,
-  onOpenChange,
-  onSave,
+  onSubmit,
+  onCancel,
   onArchive,
 }: Props) {
-  async function save(draft: BotDraft) {
-    if (await onSave(draft)) onOpenChange(false);
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{bot ? "编辑智能体" : "新建智能体"}</DialogTitle>
-          <DialogDescription>设置名称、描述、模型和可用工具。</DialogDescription>
-        </DialogHeader>
-        <BotEditorForm
-          key={bot?.id ?? "new"}
-          bot={bot}
-          capabilities={capabilities}
-          defaults={defaults}
-          busy={busy}
-          error={error}
-          onSave={save}
-          onCancel={() => onOpenChange(false)}
-        />
-        {bot && (
-          <Button
-            variant="destructive"
-            disabled={busy}
-            onClick={() => {
-              void onArchive(bot).then((saved) => {
-                if (saved) onOpenChange(false);
-              });
-            }}
-          >
-            归档智能体
-          </Button>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function BotEditorForm({
-  bot,
-  capabilities,
-  defaults,
-  busy,
-  error,
-  onSave,
-  onCancel,
-}: Pick<Props, "bot" | "capabilities" | "defaults" | "busy" | "error"> & {
-  onSave: (draft: BotDraft) => Promise<void>;
-  onCancel: () => void;
-}) {
   const [draft, setDraft] = useState(() => initializeBotDraft(bot, defaults));
   const { name, provider, modelId, thinkingLevel, instructions, cwd, extensions, tools } = draft;
   const selectedExtensions = new Set(extensions);
@@ -112,16 +55,19 @@ function BotEditorForm({
       className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
-        void onSave(draft);
+        void onSubmit(draft);
       }}
     >
-      <Input
-        aria-label="Bot 名称"
-        onChange={(event) => updateDraft("name", event.target.value)}
-        placeholder="名称"
-        required
-        value={name}
-      />
+      <label className="block space-y-2 text-sm">
+        名称
+        <Input
+          aria-label="Bot 名称"
+          onChange={(event) => updateDraft("name", event.target.value)}
+          placeholder="例如：编程助手"
+          required
+          value={name}
+        />
+      </label>
       {bot && (
         <p className="text-muted-foreground text-xs break-all">配置版本：{bot.configVersion}</p>
       )}
@@ -160,18 +106,25 @@ function BotEditorForm({
           ))}
         </select>
       </label>
-      <Textarea
-        aria-label="指令"
-        className="min-h-20 resize-y"
-        onChange={(event) => updateDraft("instructions", event.target.value)}
-        value={instructions}
-      />
-      <Input
-        aria-label="默认工作目录"
-        onChange={(event) => updateDraft("cwd", event.target.value)}
-        placeholder="默认工作目录（可留空）"
-        value={cwd}
-      />
+      <label className="block space-y-2 text-sm">
+        指令
+        <Textarea
+          aria-label="指令"
+          className="min-h-20 resize-y"
+          onChange={(event) => updateDraft("instructions", event.target.value)}
+          placeholder="可以留空"
+          value={instructions}
+        />
+      </label>
+      <label className="block space-y-2 text-sm">
+        默认工作目录
+        <Input
+          aria-label="默认工作目录"
+          onChange={(event) => updateDraft("cwd", event.target.value)}
+          placeholder="留空时使用 Runner 默认目录"
+          value={cwd}
+        />
+      </label>
       <fieldset className="space-y-1 rounded-md border p-2">
         <legend className="px-1 text-xs font-medium">Extensions</legend>
         {capabilities.extensions.map((extension) => (
@@ -213,20 +166,21 @@ function BotEditorForm({
         )}
       </fieldset>
       <p className="text-muted-foreground text-xs leading-5">
-        工作目录只是默认位置，不是文件访问隔离。配置变化只影响新建
-        Conversation；已有对话需单独应用。
+        工作目录只是默认位置，不是文件访问隔离。配置变化只影响新建对话；已有对话需单独应用。
       </p>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
-          className="flex-1"
           disabled={busy || !name.trim() || !provider.trim() || !modelId.trim()}
           type="submit"
         >
-          {bot?.id ? "保存智能体" : "创建智能体"}
+          {bot ? "保存 Bot" : "创建 Bot"}
         </Button>
-        {bot?.id && (
-          <Button disabled={busy} onClick={() => onCancel()} type="button" variant="outline">
-            取消
+        <Button disabled={busy} onClick={() => onCancel()} type="button" variant="outline">
+          取消
+        </Button>
+        {onArchive && (
+          <Button disabled={busy} onClick={() => onArchive()} type="button" variant="destructive">
+            归档 Bot
           </Button>
         )}
       </div>

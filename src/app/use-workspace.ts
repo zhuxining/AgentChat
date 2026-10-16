@@ -11,7 +11,6 @@ import type {
   RunnerCapabilities,
   runnerClient,
 } from "@/app/runner-client";
-import { initializeBotDraft } from "@/features/chat/bot-draft";
 
 type RunnerClient = typeof runnerClient;
 type PendingSubmission = { conversationId: number; text: string; requestId: string };
@@ -41,7 +40,8 @@ export function useWorkspace(client: RunnerClient) {
   const [error, setError] = useState("");
   const [pollingError, setPollingError] = useState("");
   const [notice, setNotice] = useState("");
-  const [input, setInput] = useState("");
+  // Unsend drafts stay per Bot so switching views never discards what someone typed.
+  const [inputs, setInputs] = useState<Record<string, string>>({});
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
   const [acceptedSubmission, setAcceptedSubmission] = useState<{
     conversationId: number;
@@ -73,8 +73,9 @@ export function useWorkspace(client: RunnerClient) {
       .then((initial) => {
         if (!mounted) return;
         acceptCatalog(initial);
-        setSelectedBotId(initial.bots.find((bot) => !bot.archived)?.id ?? "");
-        setConversationId(initial.conversations[0]?.id ?? null);
+        const firstBot = initial.bots.find((bot) => !bot.archived);
+        setSelectedBotId(firstBot?.id ?? "");
+        setConversationId(latestConversationId(initial.conversations, firstBot?.id) ?? null);
       })
       .catch((cause: unknown) => {
         if (mounted) {
@@ -120,6 +121,13 @@ export function useWorkspace(client: RunnerClient) {
   }, [client, conversationId, pollingPaused]);
 
   const snapshot = storedSnapshot?.conversation.id === conversationId ? storedSnapshot : null;
+  const botConversations = conversations
+    .filter((conversation) => conversation.botId === selectedBotId)
+    .sort((left, right) => left.createdAt - right.createdAt);
+  const input = inputs[selectedBotId] ?? "";
+  function setInput(value: string) {
+    setInputs((previous) => ({ ...previous, [selectedBotId]: value }));
+  }
   const selectedBot = bots.find((bot) => bot.id === selectedBotId && !bot.archived);
   const linkedBot = bots.find((bot) => bot.id === snapshot?.conversation.botId);
   const activeBot = snapshot ? linkedBot : selectedBot;
@@ -139,15 +147,14 @@ export function useWorkspace(client: RunnerClient) {
       ? goalDraftState.value
       : (snapshot?.goal.description ?? "");
 
-  async function runAction(operation: () => Promise<void>): Promise<boolean> {
+  async function runAction<T>(operation: () => Promise<T>): Promise<T | null> {
     setBusy(true);
     setError("");
     try {
-      await operation();
-      return true;
+      return await operation();
     } catch (cause) {
       setError(errorMessage(cause));
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -156,6 +163,20 @@ export function useWorkspace(client: RunnerClient) {
   function selectConversation(conversation: ConversationSummary) {
     setConversationId(conversation.id);
     setSelectedBotId(conversation.botId);
+  }
+
+  // Selecting a Bot always lands on its latest conversation; history stays reachable
+  // because every conversation of the Bot is shown in one timeline.
+  function selectBot(botId: string) {
+    setSelectedBotId(botId);
+    setConversationId(latestConversationId(conversations, botId) ?? null);
+  }
+
+  function startConversation(botId: string, cwd = "", goal = "") {
+    return runAction(async () => {
+      await openConversation(botId, cwd, goal);
+      return true;
+    });
   }
 
   async function openConversation(botId: string, cwd: string, goal: string) {
@@ -168,12 +189,12 @@ export function useWorkspace(client: RunnerClient) {
     setNotice("");
     return runAction(async () => {
       if (botId) {
-        if (!configVersion) throw new Error("缺少配置版本，请重新打开智能体编辑框。");
+        if (!configVersion) throw new Error("缺少配置版本，请重新打开 Bot 编辑页。");
         const result = await client.updateBot(botId, draft, configVersion);
         setBots(result.bots);
         setSelectedBotId(result.bot.id);
-        setNotice(`已保存 ${result.bot.name} 的新配置。现有 Conversation 不会自动改变。`);
-        return;
+        setNotice(`已保存 ${result.bot.name} 的新配置。现有对话不会自动改变。`);
+        return result.bot;
       }
       const bot = await client.createBot(draft);
       setBots((previous) => [...previous, bot]);
@@ -184,22 +205,9 @@ export function useWorkspace(client: RunnerClient) {
         await openConversation(bot.id, "", "");
       } catch (cause) {
         // Creation succeeded. Keep the Bot selected so retrying chat never creates a duplicate.
-        setError(`智能体已创建，但打开聊天失败：${errorMessage(cause)}。可以点击“开始聊天”重试。`);
+        setError(`Bot 已创建，但打开聊天失败：${errorMessage(cause)}。可以点击“开始新对话”重试。`);
       }
-    });
-  }
-
-  function startChat(cwd = "", goal = "") {
-    return runAction(async () => {
-      let bot = selectedBot;
-      if (!bot) {
-        if (!botDefaults) throw new Error("尚未取得 Runner 的智能体默认配置。");
-        bot = await client.createBot({ ...initializeBotDraft(null, botDefaults), name: "幕僚长" });
-        const created = bot;
-        setBots((previous) => [...previous, created]);
-        setSelectedBotId(bot.id);
-      }
-      await openConversation(bot.id, cwd, goal);
+      return bot;
     });
   }
 
@@ -207,9 +215,13 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       const result = await client.archiveBot(bot.id, bot.configVersion);
       setBots(result.bots);
-      if (selectedBotId === bot.id)
-        setSelectedBotId(result.bots.find((item) => !item.archived)?.id ?? "");
+      if (selectedBotId === bot.id) {
+        const next = result.bots.find((item) => !item.archived);
+        setSelectedBotId(next?.id ?? "");
+        setConversationId(latestConversationId(conversations, next?.id) ?? null);
+      }
       setNotice(`${bot.name} 已归档；已有聊天保留关联。`);
+      return true;
     });
   }
 
@@ -227,6 +239,7 @@ export function useWorkspace(client: RunnerClient) {
       );
       setStoredSnapshot(await client.snapshot(conversationId));
       setNotice("Bot 设置已应用到此 Conversation。");
+      return true;
     });
   }
 
@@ -236,6 +249,7 @@ export function useWorkspace(client: RunnerClient) {
       await client.saveGoal(conversationId, goalDraft);
       setStoredSnapshot(await client.snapshot(conversationId));
       setNotice("工作目标已保存。");
+      return true;
     });
   }
 
@@ -244,18 +258,18 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       await client.setGoalStatus(conversationId, status);
       setStoredSnapshot(await client.snapshot(conversationId));
+      return true;
     });
   }
 
   function refreshSelection(initial: InitializeResult) {
     acceptCatalog(initial);
-    setSelectedBotId((previous) =>
-      initial.bots.some((bot) => bot.id === previous && !bot.archived)
-        ? previous
-        : (initial.bots.find((bot) => !bot.archived)?.id ?? ""),
-    );
+    const nextBotId = initial.bots.some((bot) => bot.id === selectedBotId && !bot.archived)
+      ? selectedBotId
+      : (initial.bots.find((bot) => !bot.archived)?.id ?? "");
+    setSelectedBotId(nextBotId);
     if (!initial.conversations.some((conversation) => conversation.id === conversationId))
-      setConversationId(initial.conversations[0]?.id ?? null);
+      setConversationId(latestConversationId(initial.conversations, nextBotId));
   }
 
   function reloadConfiguration() {
@@ -268,6 +282,7 @@ export function useWorkspace(client: RunnerClient) {
           ? "配置重载已完成，部分磁盘修改未生效，请查看配置错误。"
           : "配置已重载。智能体默认配置用于后续执行，已有执行需显式应用。",
       );
+      return true;
     });
   }
 
@@ -277,6 +292,7 @@ export function useWorkspace(client: RunnerClient) {
       await client.saveConfiguration(path, version, content);
       refreshSelection(await client.initialize());
       setNotice("配置文件已保存并重载。已有执行的配置不会自动改变。");
+      return true;
     });
   }
 
@@ -290,6 +306,7 @@ export function useWorkspace(client: RunnerClient) {
         setRunnerUnavailable(true);
         setPollingError("");
         setNotice("后台 Runner 已停止，未完成工作保留恢复状态。可以随时启动并连接。");
+        return true;
       } catch (cause) {
         setPollingPaused(false);
         throw cause;
@@ -308,6 +325,7 @@ export function useWorkspace(client: RunnerClient) {
         setRunnerStopped(false);
         setPollingPaused(false);
         setNotice("Runner 已重新启动，pi-durable 正在恢复未完成工作。");
+        return true;
       } catch (cause) {
         setRunnerUnavailable(true);
         throw cause;
@@ -330,6 +348,7 @@ export function useWorkspace(client: RunnerClient) {
             ? "Provider 密钥已安全保存并交给 Runner。"
             : "Provider 密钥已保存；Runner 将在下次启动时读取。",
       );
+      return true;
     });
   }
 
@@ -360,6 +379,7 @@ export function useWorkspace(client: RunnerClient) {
       } catch (cause) {
         setError(`输入已被 Runner 接纳，但刷新展示失败：${errorMessage(cause)}`);
       }
+      return true;
     });
   }
 
@@ -368,6 +388,7 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       await client.abort(conversationId);
       setStoredSnapshot(await client.snapshot(conversationId));
+      return true;
     });
   }
 
@@ -383,12 +404,20 @@ export function useWorkspace(client: RunnerClient) {
             ? "输入已进入执行记录，无法再按排队输入撤回。"
             : "该输入已结束或当前不存在。",
       );
+      return true;
     });
   }
 
   return {
     catalog: { bots, conversations, capabilities, botDefaults, configuration },
-    selection: { conversationId, selectedBotId, selectedBot, activeBot, snapshot },
+    selection: {
+      conversationId,
+      selectedBotId,
+      selectedBot,
+      activeBot,
+      snapshot,
+      botConversations,
+    },
     connection: {
       loading,
       busy,
@@ -420,9 +449,9 @@ export function useWorkspace(client: RunnerClient) {
     },
     actions: {
       selectConversation,
-      selectBot: setSelectedBotId,
+      selectBot,
+      startConversation,
       saveBot,
-      startChat,
       archiveBot,
       applyBotSettings,
       saveGoal,
@@ -445,4 +474,13 @@ function errorMessage(error: unknown): string {
     : typeof error === "string"
       ? error
       : "操作失败，请重试";
+}
+
+function latestConversationId(conversations: ConversationSummary[], botId: string | undefined) {
+  if (!botId) return null;
+  return (
+    conversations
+      .filter((conversation) => conversation.botId === botId)
+      .sort((left, right) => right.createdAt - left.createdAt)[0]?.id ?? null
+  );
 }
