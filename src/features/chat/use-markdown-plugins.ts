@@ -1,6 +1,6 @@
 import { cjk } from "@streamdown/cjk";
 import { useEffect, useState } from "react";
-import type { DiagramPlugin, PluginConfig } from "streamdown";
+import type { CustomRenderer, PluginConfig } from "streamdown";
 
 import { codePlugin } from "@/lib/code-plugin";
 
@@ -8,20 +8,19 @@ const fencePattern = /^\s*```\s*mermaid\b/m;
 
 const basePlugins: PluginConfig = { code: codePlugin, cjk };
 
-// Mermaid is by far the heaviest plugin, so it is loaded only once a transcript actually
-// contains a diagram; every other reply renders without paying for it.
+// beautiful-mermaid and its layout engine are loaded only when the transcript has a diagram.
 export function useMarkdownPlugins(texts: string[]): PluginConfig {
-  const [mermaid, setMermaid] = useState<DiagramPlugin | null>(null);
+  const [renderer, setRenderer] = useState<CustomRenderer | null>(null);
   const hasDiagram = texts.some((text) => fencePattern.test(text));
   useEffect(() => {
-    if (!hasDiagram || mermaid) return;
+    if (!hasDiagram || renderer) return;
     let active = true;
-    void import("@streamdown/mermaid").then((module) => {
-      if (active) setMermaid(module.mermaid);
+    void import("./mermaid-diagram").then((module) => {
+      if (active) setRenderer({ language: "mermaid", component: module.MermaidDiagram });
     });
     return () => {
       active = false;
     };
-  }, [hasDiagram, mermaid]);
-  return mermaid ? { ...basePlugins, mermaid } : basePlugins;
+  }, [hasDiagram, renderer]);
+  return renderer ? { ...basePlugins, renderers: [renderer] } : basePlugins;
 }

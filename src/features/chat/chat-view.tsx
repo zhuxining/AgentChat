@@ -163,7 +163,7 @@ export function ChatView({ botId }: { botId: string }) {
           </Button>
         </div>
       )}
-      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport className="px-5">
             <MessageScrollerContent
@@ -190,7 +190,6 @@ export function ChatView({ botId }: { botId: string }) {
                       <MessageScrollerItem
                         key={rowId(segment.conversation.id, message.id)}
                         messageId={rowId(segment.conversation.id, message.id)}
-                        scrollAnchor={message.role === "user"}
                         className={
                           rowId(segment.conversation.id, message.id) === latestRowId
                             ? message.role === "user"
