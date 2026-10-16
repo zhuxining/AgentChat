@@ -85,7 +85,9 @@ export type InitializeResult = {
   configuration: ConfigurationStatus;
   conversations: ConversationSummary[];
   capabilities: RunnerCapabilities;
-  providers: ProviderOption[];
+  // Absent while an older background Runner is still serving; the UI falls back to the
+  // Bot's current provider and model in that case.
+  providers?: ProviderOption[];
   apiKeyConfigured: boolean;
   credentialWarning?: string;
   runtimeVersion: string;

@@ -593,6 +593,23 @@ it("renders every conversation of a Bot as one continuous timeline", async () =>
   expect(chat.getByText(/新会话/)).toBeTruthy();
 });
 
+it("renders Bot details when an older background Runner omits provider options", async () => {
+  const legacy = { ...initialState };
+  delete legacy.providers;
+  vi.mocked(runnerClient.initialize).mockResolvedValue(legacy);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  renderApp();
+  await openBot();
+  const details = await openDetails();
+  // Falls back to the Bot's current provider and model instead of crashing.
+  expect(
+    (within(details).getByRole("combobox", { name: "服务商" }) as HTMLSelectElement).value,
+  ).toBe("deepseek");
+  expect((within(details).getByRole("combobox", { name: "模型" }) as HTMLSelectElement).value).toBe(
+    "deepseek-chat",
+  );
+});
+
 it("renders the transcript as a message scroller log with a jump control", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);

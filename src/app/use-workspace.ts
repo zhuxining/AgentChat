@@ -61,7 +61,7 @@ export function useWorkspace(client: RunnerClient) {
     setBots(initial.bots);
     setConversations(initial.conversations);
     setCapabilities(initial.capabilities);
-    setProviders(initial.providers);
+    setProviders(initial.providers ?? []);
     setProviderConfigured(initial.apiKeyConfigured);
     setRuntimeVersion(initial.runtimeVersion);
     setCredentialWarning(initial.credentialWarning ?? "");
