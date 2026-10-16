@@ -16,7 +16,7 @@
         "title": "AgentChat",
         "width": 1280,
         "height": 800,
-        "minWidth": 960,
+        "minWidth": 400,
         "minHeight": 600,
         "decorations": false,
         "titleBarStyle": "Transparent"
