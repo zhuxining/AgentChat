@@ -37,6 +37,9 @@ import { RunnerSettings } from "@/features/settings/runner-settings";
 import { SettingsLayout } from "@/features/settings/settings-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
+// The collapsed Bot rail stays visible as a narrow gutter, matching the reference layout.
+const botListCollapsedSize = 52;
+
 // Desktop is a resizable three-pane workspace: the Bot list and the details pane are
 // panels the reader can drag or push away. Below that width the same views become pages.
 function WorkspaceShell() {
@@ -142,19 +145,20 @@ function WorkspaceShell() {
               id="bots"
               panelRef={botListPanelRef}
               collapsible
-              collapsedSize={0}
+              collapsedSize={botListCollapsedSize}
               defaultSize={260}
               minSize={200}
               maxSize={420}
               groupResizeBehavior="preserve-pixel-size"
-              onResize={(size) => setBotListOpen(size.inPixels > 0)}
+              onResize={(size) => setBotListOpen(size.inPixels > botListCollapsedSize)}
               className="overflow-hidden"
             >
               <aside
-                aria-label="Bot 列表"
+                aria-label={botListOpen ? "Bot 列表" : "已折叠的 Bot 侧栏"}
+                aria-hidden={!botListOpen}
                 className="bg-sidebar flex h-full min-h-0 flex-col overflow-hidden"
               >
-                {botList}
+                {botListOpen && botList}
               </aside>
             </ResizablePanel>
             <ResizableHandle className="after:w-2" />
