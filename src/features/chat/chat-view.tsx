@@ -84,7 +84,10 @@ export function ChatView({ botId }: { botId: string }) {
       aria-label="聊天内容"
       className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+      <header
+        data-window-titlebar
+        className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4"
+      >
         <Button
           aria-label="返回 Bot 列表"
           variant="ghost"
@@ -94,7 +97,7 @@ export function ChatView({ botId }: { botId: string }) {
         >
           <ChevronLeftIcon />
         </Button>
-        <div className="min-w-0 flex-1" data-tauri-drag-region>
+        <div className="min-w-0 flex-1" data-window-drag-region>
           <h1 className="truncate text-sm font-semibold">
             {selection.activeBot?.name ?? "AgentChat"}
           </h1>

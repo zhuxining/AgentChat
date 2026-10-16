@@ -254,6 +254,27 @@
   }
 }
 
+/* Keep a clear leading area for native traffic lights while the app toolbar sits
+   beneath the macOS Overlay title bar. The window controls remain AppKit-owned. */
+html[data-platform="macos"] {
+  --window-titlebar-leading-inset: 84px;
+}
+
+html[data-platform="macos"] [data-window-titlebar-leading] {
+  padding-inline-start: var(--window-titlebar-leading-inset);
+}
+
+@media (max-width: 767px) {
+  html[data-platform="macos"] [data-window-titlebar] {
+    padding-inline-start: var(--window-titlebar-leading-inset);
+  }
+}
+
+[data-window-drag-region] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 @layer utilities {
   .note-editor .milkdown {
     height: 100%;

@@ -6,6 +6,7 @@
     "autostart:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "cli:default",
     "opener:default",
     "clipboard-manager:default",

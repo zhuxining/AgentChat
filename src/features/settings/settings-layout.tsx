@@ -42,8 +42,12 @@ export function SettingsLayout() {
           active && "hidden md:flex",
         )}
       >
-        <header className="flex h-16 shrink-0 items-center px-4">
-          <span className="font-semibold" data-tauri-drag-region>
+        <header
+          data-window-titlebar
+          data-window-titlebar-leading
+          className="flex h-16 shrink-0 items-center px-4"
+        >
+          <span className="font-semibold" data-window-drag-region>
             设置
           </span>
         </header>
@@ -78,7 +82,10 @@ export function SettingsLayout() {
         </footer>
       </aside>
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !active && "hidden md:flex")}>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+        <header
+          data-window-titlebar
+          className="flex h-16 shrink-0 items-center gap-2 border-b px-4"
+        >
           <Button
             aria-label="返回设置分类"
             variant="ghost"
@@ -88,7 +95,7 @@ export function SettingsLayout() {
           >
             <ChevronLeftIcon />
           </Button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-tauri-drag-region>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-window-drag-region>
             {active ? active.label : "设置"}
           </h1>
         </header>

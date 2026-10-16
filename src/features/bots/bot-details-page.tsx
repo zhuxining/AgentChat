@@ -11,7 +11,10 @@ export function BotDetailsPage({ botId }: { botId: string }) {
       aria-label="Bot 详情"
       className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+      <header
+        data-window-titlebar
+        className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4"
+      >
         <Button
           aria-label="返回聊天"
           variant="ghost"
@@ -20,7 +23,7 @@ export function BotDetailsPage({ botId }: { botId: string }) {
         >
           <ChevronLeftIcon />
         </Button>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-tauri-drag-region>
+        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-window-drag-region>
           Bot 详情
         </h1>
       </header>

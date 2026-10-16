@@ -13,7 +13,10 @@ export function NewBotPage() {
       aria-label="新建 Bot"
       className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+      <header
+        data-window-titlebar
+        className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4"
+      >
         <Button
           aria-label="返回 Bot 列表"
           variant="ghost"
@@ -22,7 +25,7 @@ export function NewBotPage() {
         >
           <ChevronLeftIcon />
         </Button>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-tauri-drag-region>
+        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-window-drag-region>
           新建 Bot
         </h1>
       </header>

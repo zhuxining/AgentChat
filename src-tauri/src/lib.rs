@@ -34,7 +34,14 @@ pub fn run() {
 
     #[cfg(desktop)]
     let builder = builder
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

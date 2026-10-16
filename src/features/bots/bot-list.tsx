@@ -41,8 +41,12 @@ export function BotList({
   const visible = query ? active.filter((bot) => bot.name.toLowerCase().includes(query)) : active;
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <header className="flex h-16 shrink-0 items-center justify-between px-4">
-        <span className="font-semibold" data-tauri-drag-region>
+      <header
+        data-window-titlebar
+        data-window-titlebar-leading
+        className="flex h-16 shrink-0 items-center justify-between px-4"
+      >
+        <span className="font-semibold" data-window-drag-region>
           AgentChat
         </span>
         <Button
