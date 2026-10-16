@@ -1,4 +1,4 @@
-import { Outlet, useMatchRoute, useNavigate, useRouter } from "@tanstack/react-router";
+import { Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { ChevronLeftIcon, CpuIcon, InfoIcon, KeyRoundIcon, PaletteIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -17,7 +17,6 @@ export const settingsSections = [
 // Bot list, and the navigation back to the workspace lives at the bottom of its own rail.
 export function SettingsLayout() {
   const navigate = useNavigate();
-  const router = useRouter();
   const matchRoute = useMatchRoute();
   const sectionMatch = matchRoute({ to: "/settings/$section", fuzzy: true });
   const activeSection =
@@ -25,10 +24,12 @@ export function SettingsLayout() {
       ? (sectionMatch.section as string)
       : null;
   const active = settingsSections.find((item) => item.id === activeSection);
-  const { feedback } = useWorkspaceContext();
+  const { selection } = useWorkspaceContext();
 
+  // Back always targets the workspace, not the previous settings page.
   function leaveSettings() {
-    if (router.history.canGoBack()) router.history.back();
+    const botId = selection.selectedBotId;
+    if (botId) void navigate({ to: "/bots/$botId", params: { botId } });
     else void navigate({ to: "/" });
   }
 
@@ -93,11 +94,6 @@ export function SettingsLayout() {
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
           <div className="mx-auto max-w-2xl space-y-6">
-            {feedback.notice && (
-              <p role="status" className="text-muted-foreground text-xs">
-                {feedback.notice}
-              </p>
-            )}
             {active ? (
               <Outlet />
             ) : (

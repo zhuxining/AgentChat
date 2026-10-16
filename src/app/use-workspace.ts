@@ -41,7 +41,6 @@ export function useWorkspace(client: RunnerClient) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pollingError, setPollingError] = useState("");
-  const [notice, setNotice] = useState("");
   // Unsend drafts stay per Bot so switching views never discards what someone typed.
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
@@ -189,21 +188,18 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   function saveBot(botId: string | null, draft: BotDraft, configVersion?: string) {
-    setNotice("");
     return runAction(async () => {
       if (botId) {
         if (!configVersion) throw new Error("缺少配置版本，请重新打开 Bot 编辑页。");
         const result = await client.updateBot(botId, draft, configVersion);
         setBots(result.bots);
         setSelectedBotId(result.bot.id);
-        setNotice(`已保存 ${result.bot.name} 的新配置。现有对话不会自动改变。`);
         return result.bot;
       }
       const bot = await client.createBot(draft);
       setBots((previous) => [...previous, bot]);
       setSelectedBotId(bot.id);
       setConversationId(null);
-      setNotice(`已创建 ${bot.name}。`);
       try {
         await openConversation(bot.id, "", "");
       } catch (cause) {
@@ -223,14 +219,12 @@ export function useWorkspace(client: RunnerClient) {
         setSelectedBotId(next?.id ?? "");
         setConversationId(latestConversationId(conversations, next?.id) ?? null);
       }
-      setNotice(`${bot.name} 已归档；已有聊天保留关联。`);
       return true;
     });
   }
 
   function applyBotSettings() {
     if (conversationId === null) return Promise.resolve(false);
-    setNotice("");
     return runAction(async () => {
       const result = await client.applyBotSettings(conversationId);
       setConversations((previous) =>
@@ -241,7 +235,6 @@ export function useWorkspace(client: RunnerClient) {
         ),
       );
       setStoredSnapshot(await client.snapshot(conversationId));
-      setNotice("Bot 设置已应用到此 Conversation。");
       return true;
     });
   }
@@ -251,7 +244,6 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       await client.saveGoal(conversationId, goalDraft);
       setStoredSnapshot(await client.snapshot(conversationId));
-      setNotice("工作目标已保存。");
       return true;
     });
   }
@@ -276,31 +268,22 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   function reloadConfiguration() {
-    setNotice("");
     return runAction(async () => {
       const initial = await client.reloadConfiguration();
       refreshSelection(initial);
-      setNotice(
-        initial.configuration.errors.length
-          ? "配置重载已完成，部分磁盘修改未生效，请查看配置错误。"
-          : "配置已重载。智能体默认配置用于后续执行，已有执行需显式应用。",
-      );
       return true;
     });
   }
 
   function saveConfiguration(path: string, version: string, content: string) {
-    setNotice("");
     return runAction(async () => {
       await client.saveConfiguration(path, version, content);
       refreshSelection(await client.initialize());
-      setNotice("配置文件已保存并重载。已有执行的配置不会自动改变。");
       return true;
     });
   }
 
   function stopRunner() {
-    setNotice("");
     setPollingPaused(true);
     return runAction(async () => {
       try {
@@ -308,7 +291,6 @@ export function useWorkspace(client: RunnerClient) {
         setRunnerStopped(true);
         setRunnerUnavailable(true);
         setPollingError("");
-        setNotice("后台 Runner 已停止，未完成工作保留恢复状态。可以随时启动并连接。");
         return true;
       } catch (cause) {
         setPollingPaused(false);
@@ -318,7 +300,6 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   function restartRunner() {
-    setNotice("");
     setPollingPaused(true);
     return runAction(async () => {
       try {
@@ -327,7 +308,6 @@ export function useWorkspace(client: RunnerClient) {
         refreshSelection(initial);
         setRunnerStopped(false);
         setPollingPaused(false);
-        setNotice("Runner 已重新启动，pi-durable 正在恢复未完成工作。");
         return true;
       } catch (cause) {
         setRunnerUnavailable(true);
@@ -337,20 +317,10 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   function setProviderCredential(apiKey: string | null) {
-    setNotice("");
     return runAction(async () => {
       const result = await client.setProviderCredential(apiKey);
       setProviderConfigured(result.configured);
       setCredentialWarning("");
-      setNotice(
-        apiKey === null
-          ? result.configured
-            ? "系统凭据库中的密钥已移除；当前使用 DEEPSEEK_API_KEY 环境变量。"
-            : "已从系统凭据库移除 Provider 密钥。"
-          : result.runnerUpdated
-            ? "Provider 密钥已安全保存并交给 Runner。"
-            : "Provider 密钥已保存；Runner 将在下次启动时读取。",
-      );
       return true;
     });
   }
@@ -400,13 +370,14 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       const result = await client.abortSubmission(conversationId, submissionId);
       setStoredSnapshot(await client.snapshot(conversationId));
-      setNotice(
-        result.status === "aborted"
-          ? "排队输入已撤回。"
-          : result.status === "already_placed"
+      // 已撤回无需提示；未撤回的原因需要用户知道。
+      if (result.status !== "aborted") {
+        setError(
+          result.status === "already_placed"
             ? "输入已进入执行记录，无法再按排队输入撤回。"
             : "该输入已结束或当前不存在。",
-      );
+        );
+      }
       return true;
     });
   }
@@ -431,7 +402,7 @@ export function useWorkspace(client: RunnerClient) {
       runtimeVersion,
       credentialWarning,
     },
-    feedback: { error: error || pollingError, notice, dismissNotice: () => setNotice("") },
+    feedback: { error: error || pollingError },
     conversation: {
       hasLiveTasks,
       executing,

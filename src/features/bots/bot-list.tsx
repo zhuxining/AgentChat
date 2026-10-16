@@ -40,7 +40,7 @@ export function BotList({
   const query = search.trim().toLowerCase();
   const visible = query ? active.filter((bot) => bot.name.toLowerCase().includes(query)) : active;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <header className="flex h-16 shrink-0 items-center justify-between px-4">
         <span className="font-semibold" data-tauri-drag-region>
           AgentChat

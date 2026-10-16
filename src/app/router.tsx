@@ -11,8 +11,8 @@ import {
 import { SparklesIcon } from "lucide-react";
 import { useEffect } from "react";
 
-import { useBotSearch } from "@/app/bot-search-provider";
 import { useWorkspaceContext } from "@/app/workspace-provider";
+import { useWorkspaceUi } from "@/app/workspace-ui";
 import {
   Empty,
   EmptyDescription,
@@ -20,6 +20,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { BotDetailsPage } from "@/features/bots/bot-details-page";
 import { BotDetailsPane } from "@/features/bots/bot-details-pane";
 import { BotList } from "@/features/bots/bot-list";
@@ -31,18 +32,18 @@ import { GeneralSettings } from "@/features/settings/general-settings";
 import { ProviderSettings } from "@/features/settings/provider-settings";
 import { RunnerSettings } from "@/features/settings/runner-settings";
 import { SettingsLayout } from "@/features/settings/settings-layout";
-import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
-// Responsive contract: the Bot list is part of the shell at md+ and becomes the index
-// page below md; the detail pane joins the chat at xl+; every other view is a page.
+// Desktop is a resizable three-pane workspace: the Bot list and the details pane are
+// panels the reader can drag or push away. Below that width the same views become pages.
 function WorkspaceShell() {
   const workspace = useWorkspaceContext();
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
-  const { search, setSearch } = useBotSearch();
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const { botSearch, setBotSearch, detailsOpen } = useWorkspaceUi();
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
-  const indexMatch = matchRoute({ to: "/" });
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
   const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
     conversationId: workspace.selection.conversationId,
@@ -57,39 +58,53 @@ function WorkspaceShell() {
       </main>
     );
   }
+  if (!isDesktop) {
+    return (
+      <main className="bg-background text-foreground flex h-full min-h-0 overflow-hidden">
+        <Outlet />
+      </main>
+    );
+  }
+  const botList = (
+    <BotList
+      bots={workspace.catalog.bots}
+      selectedBotId={workspace.selection.selectedBotId}
+      summaries={summaries}
+      search={botSearch}
+      busy={workspace.connection.busy}
+      onSearchChange={setBotSearch}
+      onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
+      onNewBot={() => void navigate({ to: "/bots/new" })}
+      onSettings={() =>
+        void navigate({ to: "/settings/$section", params: { section: "provider" } })
+      }
+    />
+  );
   return (
     <main className="bg-background text-foreground flex h-full min-h-0 overflow-hidden">
-      <aside
-        aria-label="Bot 列表"
-        className={cn(
-          "bg-sidebar min-h-0 shrink-0 flex-col border-r",
-          settingsMatch
-            ? "hidden"
-            : indexMatch
-              ? "flex w-full md:w-64 xl:w-72"
-              : "hidden md:flex md:w-64 xl:w-72",
+      <ResizablePanelGroup>
+        {!settingsMatch && (
+          <>
+            <ResizablePanel id="bots" defaultSize={260} minSize={200} maxSize={420}>
+              <aside aria-label="Bot 列表" className="bg-sidebar flex h-full min-h-0 flex-col">
+                {botList}
+              </aside>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+          </>
         )}
-      >
-        <BotList
-          bots={workspace.catalog.bots}
-          selectedBotId={workspace.selection.selectedBotId}
-          summaries={summaries}
-          search={search}
-          busy={workspace.connection.busy}
-          onSearchChange={setSearch}
-          onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
-          onNewBot={() => void navigate({ to: "/bots/new" })}
-          onSettings={() =>
-            void navigate({ to: "/settings/$section", params: { section: "provider" } })
-          }
-        />
-      </aside>
-      <Outlet />
-      {chatMatch && !newBotMatch && (
-        <aside className="hidden min-h-0 xl:flex">
-          <BotDetailsPane />
-        </aside>
-      )}
+        <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col">
+          <Outlet />
+        </ResizablePanel>
+        {chatMatch && !newBotMatch && detailsOpen && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel id="details" defaultSize={340} minSize={260} maxSize={560}>
+              <BotDetailsPane />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
     </main>
   );
 }
@@ -125,21 +140,53 @@ function SettingsSectionPage() {
   return <GeneralSettings />;
 }
 
+// The Bot list is the workspace's own left pane on desktop and the index page below it.
 function BotsIndexPage() {
+  const workspace = useWorkspaceContext();
+  const navigate = useNavigate();
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const { botSearch, setBotSearch } = useWorkspaceUi();
+  const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
+    conversationId: workspace.selection.conversationId,
+    latestMessage:
+      workspace.selection.snapshot?.messages.filter((message) => message.text).at(-1)?.text ?? "",
+    executing: workspace.conversation.executing,
+  });
   return (
-    <section aria-label="选择 Bot" className="hidden min-h-0 min-w-0 flex-1 md:flex">
-      <Empty className="min-h-64">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <SparklesIcon />
-          </EmptyMedia>
-          <EmptyTitle>选择一个 Bot 开始聊天</EmptyTitle>
-          <EmptyDescription>
-            每个 Bot 有独立的配置与连续对话。用列表右上角的 + 创建后即可开始工作。
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    </section>
+    <>
+      {!isDesktop && (
+        <section aria-label="Bot 列表页" className="bg-sidebar flex min-h-0 flex-1 flex-col">
+          <BotList
+            bots={workspace.catalog.bots}
+            selectedBotId={workspace.selection.selectedBotId}
+            summaries={summaries}
+            search={botSearch}
+            busy={workspace.connection.busy}
+            onSearchChange={setBotSearch}
+            onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
+            onNewBot={() => void navigate({ to: "/bots/new" })}
+            onSettings={() =>
+              void navigate({ to: "/settings/$section", params: { section: "provider" } })
+            }
+          />
+        </section>
+      )}
+      {isDesktop && (
+        <section aria-label="选择 Bot" className="flex min-h-0 min-w-0 flex-1">
+          <Empty className="min-h-64">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SparklesIcon />
+              </EmptyMedia>
+              <EmptyTitle>选择一个 Bot 开始聊天</EmptyTitle>
+              <EmptyDescription>
+                每个 Bot 有独立的配置与连续对话。用左栏的 + 创建后即可开始工作。
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </section>
+      )}
+    </>
   );
 }
 

@@ -3,14 +3,14 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronLeftIcon,
-  InfoIcon,
+  PanelRightIcon,
   SparklesIcon,
   SquareIcon,
-  XIcon,
 } from "lucide-react";
 import { Fragment } from "react";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
+import { useWorkspaceUi } from "@/app/workspace-ui";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
-import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { Message, MessageContent } from "@/components/ui/message";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -40,6 +40,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 // Message ids are only unique inside a library Conversation, so rows are addressed by
 // conversation and message together once several conversations share one transcript.
@@ -51,6 +52,8 @@ export function ChatView({ botId }: { botId: string }) {
   const workspace = useWorkspaceContext();
   const { selection, connection, feedback, messaging, conversation, actions } = workspace;
   const navigate = useNavigate();
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const { detailsOpen, toggleDetails } = useWorkspaceUi();
   const segments = useBotTimeline(selection.botConversations, {
     id: selection.conversationId,
     snapshot: selection.snapshot,
@@ -96,14 +99,20 @@ export function ChatView({ botId }: { botId: string }) {
           </Button>
         )}
         <Button
-          aria-label="查看 Bot 详情"
+          aria-label={
+            isDesktop ? (detailsOpen ? "收起 Bot 详情" : "展开 Bot 详情") : "查看 Bot 详情"
+          }
           title="详情"
           variant="ghost"
           size="icon-sm"
-          className="xl:hidden"
-          onClick={() => void navigate({ to: "/bots/$botId/details", params: { botId } })}
+          aria-expanded={isDesktop ? detailsOpen : undefined}
+          onClick={() =>
+            isDesktop
+              ? toggleDetails()
+              : void navigate({ to: "/bots/$botId/details", params: { botId } })
+          }
         >
-          <InfoIcon />
+          <PanelRightIcon />
         </Button>
       </header>
       {(feedback.error || connection.credentialWarning) && (
@@ -122,22 +131,6 @@ export function ChatView({ botId }: { botId: string }) {
               重新连接
             </Button>
           )}
-        </div>
-      )}
-      {feedback.notice && (
-        <div
-          role="status"
-          className="text-muted-foreground flex items-center justify-between gap-2 border-b px-5 py-2 text-xs"
-        >
-          <span>{feedback.notice}</span>
-          <Button
-            aria-label="关闭提示"
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => feedback.dismissNotice()}
-          >
-            <XIcon />
-          </Button>
         </div>
       )}
       {hasConversation && !connection.providerConfigured && (
@@ -170,7 +163,10 @@ export function ChatView({ botId }: { botId: string }) {
                     </Marker>
                   </MessageScrollerItem>
                   {segment.snapshot.messages
-                    .filter((message) => message.text)
+                    .filter(
+                      (message) =>
+                        message.text && (message.role === "user" || message.role === "assistant"),
+                    )
                     .map((message) => (
                       <MessageScrollerItem
                         key={rowId(segment.conversation.id, message.id)}
@@ -179,15 +175,6 @@ export function ChatView({ botId }: { botId: string }) {
                       >
                         <Message align={message.role === "user" ? "end" : "start"}>
                           <MessageContent>
-                            <MessageHeader>
-                              {message.role === "user"
-                                ? "你"
-                                : message.role === "assistant"
-                                  ? segment.snapshot.conversation.botName
-                                  : message.role === "tool"
-                                    ? "工具"
-                                    : "系统"}
-                            </MessageHeader>
                             <Bubble
                               align={message.role === "user" ? "end" : "start"}
                               variant={message.role === "user" ? "default" : "muted"}

@@ -32,7 +32,8 @@ type EditState =
 
 // Detail content is shared by the wide-screen pane and the standalone page. Simple values
 // change inline; anything with real editing volume opens a dialog instead of a separate page.
-export function BotDetailsView() {
+// The pane leaves error reporting to the chat banner beside it instead of repeating it.
+export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean }) {
   const { catalog, selection, connection, conversation, feedback, actions } = useWorkspaceContext();
   const navigate = useNavigate();
   const [edit, setEdit] = useState<EditState>(null);
@@ -67,12 +68,9 @@ export function BotDetailsView() {
 
   return (
     <div className="space-y-5">
-      {(feedback.error || feedback.notice) && (
-        <p
-          role={feedback.error ? "alert" : "status"}
-          className={feedback.error ? "text-destructive text-sm" : "text-muted-foreground text-xs"}
-        >
-          {feedback.error || feedback.notice}
+      {showFeedback && feedback.error && (
+        <p role="alert" className="text-destructive text-sm">
+          {feedback.error}
         </p>
       )}
       <div className="bg-card flex items-center gap-3 rounded-xl border p-3">

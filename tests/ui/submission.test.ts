@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act, createElement } from "react";
-import { afterEach, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 import App from "../../src/App";
 import {
@@ -35,9 +35,22 @@ vi.mock("../../src/app/runner-client", () => ({
   },
 }));
 
+// happy-dom 不解析媒体查询，布局判断需要显式桩；默认按桌面宽度运行。
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("min-width"),
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const initialSnapshot: ConversationSnapshot = {
@@ -129,9 +142,13 @@ function renderApp() {
 // The list is always present in the shell; opening a Bot is the only way into a chat.
 async function openBot(name: string | RegExp = /测试助手/) {
   fireEvent.click(await screen.findByRole("button", { name }));
+  await screen.findByRole("region", { name: "聊天内容" });
 }
 
 async function openDetails() {
+  // Desktop keeps the details pane open by default; below md it becomes a page.
+  const pane = screen.queryByRole("complementary", { name: "Bot 详情" });
+  if (pane) return pane;
   fireEvent.click(await screen.findByRole("button", { name: "查看 Bot 详情" }));
   return screen.findByRole("region", { name: "Bot 详情" });
 }
@@ -406,21 +423,20 @@ it("clears the credential draft after saving and when leaving settings", async (
   expect((within(reopened).getByLabelText("DeepSeek API Key") as HTMLInputElement).value).toBe("");
 });
 
-it("preserves an unsaved work goal while moving between chat and details", async () => {
+it("preserves an unsaved work goal while the details pane is pushed away", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
   renderApp();
   await openBot();
-  const paneGoal = await screen.findByRole("textbox", { name: "工作目标" });
-  fireEvent.change(paneGoal, { target: { value: "保留目标草稿" } });
-  const details = await openDetails();
+  const pane = within(await openDetails());
+  fireEvent.change(pane.getByRole("textbox", { name: "工作目标" }), {
+    target: { value: "保留目标草稿" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "收起 Bot 详情" }));
+  fireEvent.click(await screen.findByRole("button", { name: "展开 Bot 详情" }));
   expect(
-    (within(details).getByRole("textbox", { name: "工作目标" }) as HTMLTextAreaElement).value,
+    ((await screen.findByRole("textbox", { name: "工作目标" })) as HTMLTextAreaElement).value,
   ).toBe("保留目标草稿");
-  fireEvent.click(within(details).getByRole("button", { name: "返回聊天" }));
-  expect((screen.getByRole("textbox", { name: "工作目标" }) as HTMLTextAreaElement).value).toBe(
-    "保留目标草稿",
-  );
 });
 
 it("starts a fresh dialog draft when the same field is reopened", async () => {
@@ -618,6 +634,28 @@ it("renders the transcript as a message scroller log with a jump control", async
   const chat = within(await screen.findByRole("region", { name: "聊天内容" }));
   expect(chat.getByRole("log")).toBeTruthy();
   expect(chat.getByRole("button", { name: "跳到最新消息" })).toBeTruthy();
+});
+
+it("falls back to a page stack below the desktop width", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  renderApp();
+  // The index page is the Bot list itself, and details become a page again.
+  expect(await screen.findByRole("region", { name: "Bot 列表页" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: /测试助手/ }));
+  const chat = within(await screen.findByRole("region", { name: "聊天内容" }));
+  fireEvent.click(chat.getByRole("button", { name: "查看 Bot 详情" }));
+  expect(await screen.findByRole("region", { name: "Bot 详情" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "返回聊天" }));
+  expect(await screen.findByRole("region", { name: "聊天内容" })).toBeTruthy();
 });
 
 it("keeps unsent input per Bot when switching Bots", async () => {
