@@ -2,196 +2,27 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
-import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
-import {
-  AgentDoc,
-  configure,
-  createRegistry,
-  defineDoc,
-  defineExtension,
-  Harness,
-  section,
-  type AgentChange,
-  type AgentState,
-  type Extension,
-  type JsonObject,
-  type ModelRef,
-  type SubmissionId,
-  type ToolRegistration,
-} from "@earendil-works/pi-durable";
+import type { MutableModels } from "@earendil-works/pi-ai/models";
+import { AgentDoc, configure, Harness, type SubmissionId } from "@earendil-works/pi-durable";
 import type { Conversation, ConversationId } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import {
-  createBashTool,
-  createEditTool,
-  createReadTool,
-  createWriteTool,
-} from "@earendil-works/pi-durable/tools";
+
+import { createAgentConfiguration, workGoalExtension } from "./agent-configuration.js";
+import { normalizeBot, numberField, parseBot, stringField, type Bot } from "./bot.js";
+import { BotsDoc, ConversationDoc, GoalDoc, type ConversationSummary } from "./documents.js";
+import { projectMessages } from "./projection.js";
+import { prepareProvider } from "./provider.js";
 
 const context = BACKGROUND_CONTEXT;
 const maxTextLength = 16_000;
-const maxProjectedMessages = 50;
-const maxProjectedTextChars = 2_000;
-const toolDefinitions = [createBashTool(), createEditTool(), createReadTool(), createWriteTool()];
-const defaultToolNames = toolDefinitions.map((tool) => tool.name);
-type ThinkingLevel = Exclude<NonNullable<AgentState["thinkingLevel"]>, "max">;
-const thinkingLevels: readonly ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
-
-type Bot = {
-  id: string;
-  name: string;
-  model: ModelRef;
-  thinkingLevel: ThinkingLevel;
-  instructions: string;
-  cwd: string;
-  extensions: string[];
-  tools: string[];
-  revision: number;
-  archived: boolean;
-};
-type BotsDocument = JsonObject & { bots: Bot[]; conversations: ConversationSummary[] };
-type ConversationMetadata = JsonObject & {
-  botId: string;
-  botName: string;
-  botRevision: number;
-  cwdOverride: string | null;
-  createdAt: number;
-};
-type ConversationSummary = {
-  id: number;
-  botId: string;
-  botName: string;
-  botRevision: number;
-  createdAt: number;
-};
-type GoalDocument = JsonObject & {
-  description: string;
-  status: "open" | "completed";
-  updatedAt: number;
-  completedAt: number | null;
-};
-type MessageProjection = {
-  id: number;
-  role: "user" | "assistant" | "tool" | "system";
-  text: string;
-  truncated: boolean;
-};
-
-const BotsDoc = defineDoc<BotsDocument>({
-  kind: "app.bots",
-  version: 1,
-  scope: "session",
-  initial: () => ({ bots: [], conversations: [] }),
-});
-const ConversationDoc = defineDoc<ConversationMetadata>({
-  kind: "app.conversation",
-  version: 1,
-  scope: "conversation",
-  history: "latest",
-  fork: "current",
-  initial: () => ({
-    botId: "",
-    botName: "Conversation",
-    botRevision: 0,
-    cwdOverride: null,
-    createdAt: 0,
-  }),
-});
-const GoalDoc = defineDoc<GoalDocument>({
-  kind: "app.work-goal",
-  version: 1,
-  scope: "conversation",
-  history: "latest",
-  fork: "current",
-  initial: () => ({ description: "", status: "open", updatedAt: 0, completedAt: null }),
-});
-const workGoalExtension = defineExtension({
-  name: "agentchat-work-goal",
-  sections: [
-    section("work-goal", async ({ conversationId, read }, renderContext) => {
-      const goal = await read.snapshot(GoalDoc, conversationId, renderContext);
-      if (!goal?.description.trim()) return undefined;
-      const status =
-        goal.status === "completed"
-          ? "The user explicitly marked this goal complete. Do not claim a different completion state; handle new requests normally."
-          : "The goal remains open until the user explicitly marks it complete. Ending a run or task does not complete it.";
-      return `${goal.description}\n\nGoal status: ${status}`;
-    }),
-  ],
-});
-const codingToolsExtension = defineExtension({ name: "coding-tools", tools: toolDefinitions });
 
 type RunnerOptions = { dataDir: string; models?: MutableModels };
 
 export async function createApplicationRunner({ dataDir, models: providedModels }: RunnerOptions) {
   await mkdir(dataDir, { recursive: true });
-  let providerApiKey = process.env.DEEPSEEK_API_KEY;
-  // NodeExecutionEnv gives child tools their configured shell environment; keep secrets out of it.
-  delete process.env.DEEPSEEK_API_KEY;
-  delete process.env.OPENAI_API_KEY;
-  const toolEnvironment = { ...process.env };
-  const models = providedModels ?? createModels();
-  if (!providedModels) {
-    const provider = deepseekProvider();
-    const apiKeyAuth = provider.auth.apiKey;
-    if (!apiKeyAuth) throw new Error("DeepSeek Provider 未配置 API Key 认证接口");
-    // pi-ai's bundled DeepSeek catalog currently lists V4 IDs, not the public chat/reasoner API aliases.
-    // Register both aliases with conservative limits until they appear in the upstream catalog.
-    const reference = provider.getModels()[0];
-    if (!reference) throw new Error("DeepSeek Provider 缺少模型定义");
-    const aliases = (["deepseek-chat", "deepseek-reasoner"] as const).map((id) => ({
-      ...reference,
-      id,
-      name: id,
-      input: ["text"] as ("text" | "image")[],
-      reasoning: id === "deepseek-reasoner",
-      thinkingLevelMap: undefined,
-      contextWindow: 64_000,
-      maxTokens: 8_192,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    }));
-    models.setProvider({
-      ...provider,
-      getModels: () => aliases,
-      getAllModels: () => aliases,
-      auth: {
-        ...provider.auth,
-        apiKey: {
-          ...apiKeyAuth,
-          resolve: async ({ credential, signal }) => {
-            signal.throwIfAborted();
-            if (credential?.key) {
-              return {
-                auth: { apiKey: credential.key },
-                env: credential.env,
-                source: "stored credential",
-              };
-            }
-            return providerApiKey
-              ? { auth: { apiKey: providerApiKey }, source: "Runner credential" }
-              : undefined;
-          },
-        },
-      },
-    });
-  }
-  const registry = createRegistry();
-  registry.install(workGoalExtension);
-  registry.install(codingToolsExtension);
-  const extensionByName = new Map<string, Extension>(
-    registry
-      .snapshot()
-      .installed()
-      .map((extension) => [extension.name, extension]),
-  );
-  const toolByName = new Map<string, ToolRegistration>(
-    toolDefinitions.map((tool) => [tool.name, tool]),
-  );
-  const toolExtensionByName = new Map<string, string>(
-    toolDefinitions.map((tool) => [tool.name, codingToolsExtension.name]),
-  );
+  const { models, toolEnvironment, isConfigured, setCredential } = prepareProvider(providedModels);
+  const { registry, resolveAgentChange, missingConfiguration } = createAgentConfiguration(models);
   const harness = await Harness.open(
     await openNodeSqliteStorage(join(dataDir, "agentchat.sqlite")),
     {
@@ -230,47 +61,9 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
     return conversation;
   }
 
-  function resolveAgentChange(bot: Bot): AgentChange {
-    if (!models.getModel(bot.model.provider, bot.model.modelId)) {
-      throw new Error(`模型「${bot.model.provider}/${bot.model.modelId}」当前不可用`);
-    }
-    const selectedExtensions = [
-      workGoalExtension,
-      ...bot.extensions.map((name) => {
-        if (name === workGoalExtension.name)
-          throw new Error(`Extension「${name}」由 AgentChat 管理`);
-        const extension = extensionByName.get(name);
-        if (!extension) throw new Error(`Bot 选择的 Extension「${name}」当前不可用`);
-        return extension;
-      }),
-    ];
-    const selectedExtensionNames = new Set(selectedExtensions.map((extension) => extension.name));
-    const selectedTools = bot.tools.map((name) => {
-      const tool = toolByName.get(name);
-      if (!tool) throw new Error(`Bot 选择的 Tool「${name}」当前不可用`);
-      const owner = toolExtensionByName.get(name);
-      if (!owner || !selectedExtensionNames.has(owner)) {
-        throw new Error(`Tool「${name}」所属的 Extension 未启用`);
-      }
-      return tool;
-    });
-    return {
-      model: bot.model,
-      thinkingLevel: bot.thinkingLevel,
-      instructions: bot.instructions || null,
-      cwd: bot.cwd || null,
-      extensions: selectedExtensions,
-      tools: selectedTools,
-    };
-  }
-
   async function configurationErrors(conversation: Conversation) {
     const stored = await harness.snapshot(AgentDoc, conversation.id, context);
-    const requestedExtensions = configuredNames(stored?.extensions);
-    const requestedTools = configuredNames(stored?.tools);
-    const missingExtensions = requestedExtensions.filter((name) => !extensionByName.has(name));
-    const missingTools = requestedTools.filter((name) => !toolByName.has(name));
-    return { missingExtensions, missingTools };
+    return missingConfiguration(stored?.extensions, stored?.tools);
   }
 
   async function requireAvailableConfiguration(conversation: Conversation) {
@@ -316,37 +109,7 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
       const goal = await harness.snapshot(GoalDoc, conversation.id, context);
       const agent = await conversation.agent(context);
       const missing = await configurationErrors(conversation);
-      const messages: MessageProjection[] = state.value.entries
-        .slice(-maxProjectedMessages)
-        .map((entry) => {
-          const model = entry.model?.[0] as { role?: string; content?: unknown } | undefined;
-          // User entries use string content; assistant/tool entries may use structured blocks.
-          const text =
-            typeof model?.content === "string"
-              ? model.content
-              : Array.isArray(model?.content)
-                ? model.content
-                    .map((part) => {
-                      if (!part || typeof part !== "object") return "";
-                      const item = part as { type?: string; text?: string; name?: string };
-                      if (item.type === "text") return item.text ?? "";
-                      if (item.type === "toolCall") return `调用工具：${item.name ?? "工具"}`;
-                      return "";
-                    })
-                    .filter(Boolean)
-                    .join("\n")
-                : "";
-          const role =
-            model?.role === "user"
-              ? "user"
-              : model?.role === "assistant"
-                ? "assistant"
-                : model?.role === "system"
-                  ? "system"
-                  : "tool";
-          const limitedText = limitText(text);
-          return { id: entry.id, role, text: limitedText.text, truncated: limitedText.truncated };
-        });
+      const { messages, hasMoreMessages } = projectMessages(state.value.entries);
       const inspection = await harness.inspect(context);
       const activeTasks = Object.values(graph.value.tasks)
         .filter((task) => task.conversationId === conversation.id)
@@ -383,11 +146,11 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
         },
         goal: goal ?? { description: "", status: "open", updatedAt: 0, completedAt: null },
         messages,
-        hasMoreMessages: state.value.entries.length > maxProjectedMessages,
+        hasMoreMessages,
         activeTasks,
         submissions,
         configurationErrors: missing,
-        apiKeyConfigured: Boolean(providerApiKey),
+        apiKeyConfigured: isConfigured(),
       };
     } finally {
       state.dispose();
@@ -414,7 +177,7 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
               .tools()
               .map(({ extension, tool }) => ({ name: tool.name, extension: extension.name })),
           },
-          apiKeyConfigured: Boolean(providerApiKey),
+          apiKeyConfigured: isConfigured(),
           runtimeVersion: process.version,
         };
       }
@@ -595,17 +358,8 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
           await conversation.abort(context);
           return { stopped: true };
         });
-      case "setProviderCredential": {
-        const apiKey = input.apiKey;
-        if (
-          apiKey !== null &&
-          (typeof apiKey !== "string" || apiKey.trim().length === 0 || apiKey.length > 8_000)
-        ) {
-          throw new Error("Provider 凭据无效");
-        }
-        providerApiKey = apiKey === null ? undefined : apiKey;
-        return { configured: Boolean(providerApiKey) };
-      }
+      case "setProviderCredential":
+        return setCredential(input.apiKey);
       case "close":
         await harness.close(context);
         return { closed: true };
@@ -615,103 +369,4 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
   }
 
   return { handle };
-}
-
-function normalizeBot(bot: Bot): Bot {
-  return {
-    ...bot,
-    thinkingLevel: thinkingLevels.includes(bot.thinkingLevel) ? bot.thinkingLevel : "medium",
-    extensions: Array.isArray(bot.extensions)
-      ? bot.extensions.filter((name) => typeof name === "string")
-      : [codingToolsExtension.name],
-    tools: Array.isArray(bot.tools)
-      ? bot.tools.filter((name) => typeof name === "string")
-      : defaultToolNames,
-    revision: Number.isSafeInteger(bot.revision) && bot.revision > 0 ? bot.revision : 1,
-    archived: bot.archived === true,
-  };
-}
-
-function parseBot(
-  input: Record<string, unknown>,
-  base: Pick<Bot, "id" | "revision" | "archived">,
-): Bot {
-  const name = stringField(input, "name", 80);
-  const modelId = stringField(input, "modelId", 120);
-  const instructions = stringField(input, "instructions", 8_000, true);
-  const cwd = stringField(input, "cwd", 2_000, true);
-  const thinkingLevel = stringField(input, "thinkingLevel", 16) as ThinkingLevel;
-  if (!thinkingLevels.includes(thinkingLevel)) throw new Error("Thinking Level 无效");
-  const extensions = stringArrayField(input, "extensions", 30);
-  const tools = stringArrayField(input, "tools", 100);
-  if (new Set(extensions).size !== extensions.length || new Set(tools).size !== tools.length) {
-    throw new Error("Extension 或 Tool 不能重复");
-  }
-  return {
-    ...base,
-    name,
-    model: { provider: "deepseek", modelId },
-    thinkingLevel,
-    instructions,
-    cwd,
-    extensions,
-    tools,
-  };
-}
-
-function configuredNames(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((name): name is string => typeof name === "string");
-  if (value && typeof value === "object" && "add" in value) {
-    const add = (value as { add?: unknown }).add;
-    if (Array.isArray(add)) return add.filter((name): name is string => typeof name === "string");
-  }
-  return [];
-}
-
-function limitText(value: string): { text: string; truncated: boolean } {
-  const characters = Array.from(value);
-  return {
-    text: characters.slice(0, maxProjectedTextChars).join(""),
-    truncated: characters.length > maxProjectedTextChars,
-  };
-}
-
-function stringField(
-  input: Record<string, unknown>,
-  name: string,
-  maxLength: number,
-  optional = false,
-): string {
-  const value = input[name];
-  if (optional && (value === undefined || value === "")) return "";
-  if (typeof value !== "string" || value.length > maxLength) throw new Error(`字段 ${name} 无效`);
-  if (!optional && value.trim().length === 0) throw new Error(`字段 ${name} 不能为空`);
-  return value.trim();
-}
-
-function stringArrayField(
-  input: Record<string, unknown>,
-  name: string,
-  maxItems: number,
-): string[] {
-  const value = input[name];
-  if (
-    !Array.isArray(value) ||
-    value.length > maxItems ||
-    value.some((item) => typeof item !== "string")
-  ) {
-    throw new Error(`字段 ${name} 无效`);
-  }
-  const values = value.map((item) => (item as string).trim());
-  if (values.some((item) => item.length === 0 || item.length > 120))
-    throw new Error(`字段 ${name} 无效`);
-  return values;
-}
-
-function numberField(input: Record<string, unknown>, name: string): number {
-  const value = input[name];
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`字段 ${name} 无效`);
-  }
-  return value;
 }

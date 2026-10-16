@@ -26,6 +26,17 @@ bun run tauri build --bundles app
 
 `cwd` 只是工具默认工作目录，不构成文件访问隔离。当前内置 Extension 提供 `read`、`write`、`edit` 和 `bash` 工具。
 
+## 源码职责
+
+- `src/App.tsx`：装配桌面聊天入口和 Runner Adapter。
+- `src/features/chat/chat-workspace.tsx`：组合三栏和弹窗，管理面板开关与编辑对象。
+- `src/features/chat/use-workspace.ts`：统一管理 Runner 同步、会话选择、消息重试和跨视图操作；通过传入的 Runner Adapter 访问宿主。
+- `src/features/chat/` 中其余视图：会话列表、聊天、资料栏及智能体、新聊天、设置弹窗；表单自行管理草稿。
+- `src/app/runner-client.ts`：集中定义前端请求类型与 Tauri IPC 适配。
+- `runner/src/application.ts`：组合 Harness 并处理应用请求；Provider 凭据、Agent 配置、Document 定义、Bot 校验及消息投影分别放在对应文件中。
+
+界面行为通过 `tests/ui/submission.test.ts` 验证，Runner 行为通过 `createApplicationRunner` 的请求入口验证。内部拆分不改变 IPC 或 SQLite Document 格式。
+
 ## 本机数据与凭据
 
 pi-durable SQLite 数据保存在 Tauri 应用数据目录下的 `runner/agentchat.sqlite`。Provider 密钥存储在操作系统凭据库中；Linux 桌面需要可用的 Secret Service。`DEEPSEEK_API_KEY` 进程环境变量可作为本机开发配置来源；启动 Tauri 的进程必须实际继承该变量，Shell 配置中的注释行不会生效。密钥通过私有 IPC 传给 Runner，工具进程不会继承该密钥。

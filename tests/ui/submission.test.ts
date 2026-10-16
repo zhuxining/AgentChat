@@ -11,6 +11,9 @@ import {
 
 vi.mock("../../src/app/runner-client", () => ({
   runnerClient: {
+    updateBot: vi.fn<typeof runnerClient.updateBot>(),
+    applyBotSettings: vi.fn<typeof runnerClient.applyBotSettings>(),
+    setProviderCredential: vi.fn<typeof runnerClient.setProviderCredential>(),
     createBot: vi.fn<typeof runnerClient.createBot>(),
     createConversation: vi.fn<typeof runnerClient.createConversation>(),
     initialize: vi.fn<() => Promise<InitializeResult>>(),
@@ -259,4 +262,122 @@ it("keeps the created assistant when opening its chat fails and retries without 
   ).toBeTruthy();
   expect(runnerClient.createBot).toHaveBeenCalledTimes(1);
   expect(runnerClient.createConversation).toHaveBeenCalledTimes(2);
+});
+
+it("keeps tool selection consistent while editing and applies settings only on request", async () => {
+  let snapshot = initialSnapshot;
+  const updated = {
+    ...initialState.bots[0]!,
+    model: { provider: "deepseek", modelId: "deepseek-reasoner" },
+    extensions: [],
+    tools: [],
+    revision: 2,
+  };
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockImplementation(async () => snapshot);
+  vi.mocked(runnerClient.updateBot).mockResolvedValue({ bot: updated, bots: [updated] });
+  vi.mocked(runnerClient.applyBotSettings).mockImplementation(async () => {
+    snapshot = {
+      ...initialSnapshot,
+      conversation: {
+        ...initialSnapshot.conversation,
+        botRevision: 2,
+        agent: {
+          ...initialSnapshot.conversation.agent,
+          model: updated.model,
+          extensions: [],
+          tools: [],
+        },
+      },
+    };
+    return { botRevision: 2 };
+  });
+  render(createElement(App));
+  fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog", { name: "编辑智能体" });
+  const editor = within(dialog);
+  fireEvent.click(editor.getByRole("checkbox", { name: "coding-tools" }));
+  expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).checked).toBe(false);
+  expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(editor.getByRole("combobox", { name: "模型 ID" }), {
+    target: { value: "deepseek-reasoner" },
+  });
+  fireEvent.click(editor.getByRole("button", { name: "保存智能体" }));
+  await waitFor(() =>
+    expect(runnerClient.updateBot).toHaveBeenCalledWith(
+      "bot-1",
+      expect.objectContaining({ modelId: "deepseek-reasoner", extensions: [], tools: [] }),
+    ),
+  );
+  const apply = await screen.findByRole("button", { name: "应用最新智能体设置" });
+  expect(runnerClient.applyBotSettings).not.toHaveBeenCalled();
+  fireEvent.click(apply);
+  await waitFor(() => expect(runnerClient.applyBotSettings).toHaveBeenCalledWith(41));
+  expect(
+    await within(screen.getByRole("complementary", { name: "智能体资料" })).findByText(
+      "deepseek-reasoner",
+    ),
+  ).toBeTruthy();
+});
+
+it("clears the credential draft after saving and when closing settings", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  vi.mocked(runnerClient.setProviderCredential).mockResolvedValue({
+    configured: true,
+    runnerUpdated: true,
+  });
+  render(createElement(App));
+  fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+  let dialog = await screen.findByRole("dialog", { name: "设置" });
+  fireEvent.change(within(dialog).getByLabelText("DeepSeek API Key"), {
+    target: { value: "test-only-credential" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "安全保存" }));
+  await waitFor(() =>
+    expect((within(dialog).getByLabelText("DeepSeek API Key") as HTMLInputElement).value).toBe(""),
+  );
+  expect(runnerClient.setProviderCredential).toHaveBeenCalledWith("test-only-credential");
+  fireEvent.change(within(dialog).getByLabelText("DeepSeek API Key"), {
+    target: { value: "unsaved-test-value" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  dialog = await screen.findByRole("dialog", { name: "设置" });
+  expect((within(dialog).getByLabelText("DeepSeek API Key") as HTMLInputElement).value).toBe("");
+});
+
+it("preserves an unsaved work goal when the inspector is collapsed", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  render(createElement(App));
+  const goal = await screen.findByRole("textbox", { name: "工作目标" });
+  fireEvent.change(goal, { target: { value: "保留目标草稿" } });
+  fireEvent.click(screen.getByRole("button", { name: "收起智能体资料" }));
+  fireEvent.click(screen.getByRole("button", { name: "展开智能体资料" }));
+  expect((screen.getByRole("textbox", { name: "工作目标" }) as HTMLTextAreaElement).value).toBe(
+    "保留目标草稿",
+  );
+});
+
+it("starts a fresh editor draft when the same assistant is reopened immediately", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  render(createElement(App));
+  const edit = await screen.findByRole("button", { name: "编辑" });
+  fireEvent.click(edit);
+  const dialog = await screen.findByRole("dialog", { name: "编辑智能体" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Bot 名称" }), {
+    target: { value: "未保存的名称" },
+  });
+  // Reopen before the dialog can unmount, as happens during its close animation.
+  act(() => {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(edit);
+  });
+  const reopened = await screen.findByRole("dialog", { name: "编辑智能体" });
+  expect(
+    (within(reopened).getByRole("textbox", { name: "Bot 名称" }) as HTMLInputElement).value,
+  ).toBe("测试助手");
 });
