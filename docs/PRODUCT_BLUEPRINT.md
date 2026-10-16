@@ -1,89 +1,58 @@
 # AgentChat 产品蓝图
 
-版本：v0.5
-状态：产品方向与范围基线；Issue #8 本地桌面功能已实现，macOS `.app` 启动/退出已验证；真实 Provider、Tauri 进程重启恢复及其他平台验收待完成。多端与 Relay 尚未实现
+版本：v0.6
+
+状态：独立后台 Runner 与文件配置已实现，macOS 本机后台与桌面临时目录冒烟通过；多端与 Relay 尚未实现，Windows 本机 IPC 尚未实现。
 
 ## 产品定位
 
-AgentChat 是支持多端聊天和工作管理的本机 Agent 工作台。用户选择具名 Bot，通过 Conversation 持续协作、提交输入、查看执行过程并跟进工作目标；Agent 运行在用户的桌面 Runner 上。
+AgentChat 是支持持续对话与工作管理的本机 Agent 工作台。用户选择具名 Bot，提交输入、查看执行过程并跟进工作目标。桌面 UI 是控制端，独立后台 Runner 管理配置、工作区与执行状态；关闭或退出 UI 不停止工作。
 
-桌面端和 iOS/Android 客户端通过 Relay 同步，可跨网络访问，无需手机与桌面处于同一局域网。每台 Device 保有本地展示数据与待发送输入；手机不运行 Agent。
+产品 Conversation 是连续聊天窗口，可以在同一消息流中容纳多个会话。它不默认等同于 pi-durable Conversation，也不决定 Runner 的执行结构。执行术语与产品术语见[术语表](../GLOSSARY.md)。
 
-类似 Grok bot 的持续对话是交互目标。Telegram、Discord 等外部消息渠道、定时触发与主动推送为后续方向；联网搜索未来通过 Skill/MCP 扩展，本轮不设计其实现。
+未来桌面与 iOS/Android 客户端通过独立 Relay 跨网络同步。手机不运行 Harness；多端通信不改变 Runner 对执行状态的权威归属。
 
-## 实现原则
+## 执行与宿主边界
 
-所有 Agent 执行围绕 pi-durable 的公开能力构建。应用负责 Bot、工作目标、界面、多端通信和平台装配；模型循环、输入接纳、会话排队、Task 调度、检查点、取消与恢复全部交给 Harness。
+所有 Agent 执行围绕 pi-durable 公开能力构建，模型循环、输入接纳、排队、Task 调度、检查点及恢复由 Harness 提供。Runner 是独立后台运行单元，不是另一套自建执行引擎。
 
-承载进程只是运行库并连接应用入口，不实现另一套 runtime。库缺少的能力先验证公开 API 或降低首发承诺，不自建执行引擎、持久化调度器或通用恢复框架。
+原生后台宿主管理进程、本机连接和系统凭据；Node Runner 装配 Harness、加载配置并提供类型化操作。UI 启动先连接已有实例，未运行时再启动。当前采用受当前用户权限限制的 Unix socket；Windows 本机 IPC 尚未实现。后台不开放远程网络端口。
 
-## 统一概念
+停止 Runner 是显式操作：停止接收新请求、调用 Harness.close 并收尾，保留可恢复工作。取消工作与撤回输入是独立操作，按库公开接口的作用范围执行。再次启动重新装配能力、打开 Storage 并恢复，不从 UI 历史重放输入。开机自启不在本轮范围。
 
-以[术语表](../GLOSSARY.md)为准：Agent 是 Conversation 执行配置；Bot 是应用档案；Task 专指 pi-durable 的持久化状态机。Identity、Device、Runner 和 Relay 是多端应用概念，不声称由 pi-durable 提供。
+## 配置所有权
 
-聊天入口和工作管理入口组织同一批 Conversation。原“产品任务”表达为带工作目标的 Conversation，目标说明和用户确认的状态保存为 Document。
+Runner 的期望配置以 `runner.json` 和 `bots/<id>/bot.json` 为权威来源，UI 与独立编辑器修改同一份文件。UI 自己拥有主题、窗口和本地选择等偏好，不保存另一份权威 Bot 配置。Provider 密钥保存在安全凭据设施，JSON 只保存引用。
 
-## Bot 与 Conversation
+默认数据目录为 `~/.agentchat`，允许 `AGENTCHAT_DATA_DIR` 指定绝对路径；不迁移旧目录、格式或数据库。目录和字段见[配置集成设计](architecture/01-pi-durable.md#配置文件)。
 
-Bot 独立设置 model、thinkingLevel、instructions、Extension/Tool 选择与默认 cwd，并绑定 Runner。首发只有一个桌面 Runner，所有 Bot 共用该 Runner 的 Harness；不引入跨 Runner 调度或迁移。
+- 启动或显式重载读取文件，第一阶段不做文件监听。
+- UI 保存需携带读取时的内容版本；发现外部修改拒绝覆盖，Runner 原子写入。
+- 无效重载保留已加载的有效配置并报告未生效内容；冷启动无效 Bot 单独禁用，必要 Runner 配置无效时保持可诊断而不执行。
+- Harness 动态 settings 与 Agent 持久选择分开；Provider 声明等进程资源变化需重启。
 
-Provider 配置集中管理，Bot 引用 Provider。凭据集中留在 Runner 安全存储中，不进入 Bot 快照或同步到手机。移动端显示连接状态与可选模型；首发凭据配置入口在桌面。
+## Bot 与工作区
 
-一个 Bot 可以创建多个 Conversation。创建时复制默认 Agent 配置与 Bot 版本，允许覆盖 cwd；已有 Conversation 不自动跟随配置编辑。空闲时可显式应用最新配置。
+Bot 拥有稳定 ID、名称、归档状态、默认模型、思考级别、指令、能力选择和工作区。创建时将 `botDefaults` 具体化写入 Bot 文件；后续修改默认模板不影响已有 Bot。
 
-归档 Bot 阻止从它创建新 Conversation，保留已有 Conversation 和恢复关联。配置变更由所属 Runner 确认，客户端同步其结果。
+Agent 指令选择内联 `instructions` 或独立 `instructionsFile`，两者排他；显式重载时读取内容，创建执行时保存有效内容。已有执行不自动追随 Bot 文件变化，空闲时才能显式应用新配置。快照保存选择和内容，不冻结能力代码、凭据或全局 settings。
 
-## 多端聊天
+每个 Bot 自动分配稳定默认工作区，也可以使用外部项目目录。同一 Bot 的多个执行默认共享文件，没有自动目录副本或并发隔离。cwd 不构成路径权限或 OS 沙箱；修改默认目录不隐式移动既有执行。
 
-任一已配对 Device 可查看已同步历史并保存输入。发送过程明确区分：
+归档或配置缺失禁止从 Bot 新建执行上下文；删除或移动 `bot.json` 不删除历史、不清理工作区、不取消已接纳工作。归档、取消、删除历史与清理各自独立。
 
-1. 本机已保存，等待上传。
-2. 已交给 Relay，等待 Runner 接纳。
-3. Runner 已接纳为 Submission，排队或正在运行。
-4. 已得到回答，或显示未回答原因。
+## 输入、目标与多端
 
-前两步不是 Submission，也不显示为 Agent 已运行。网络恢复或 Runner 上线后自动继续投递；重试保持稳定 ID，避免创建重复输入。客户端可以在展示中先显示待发送行，Runner 接纳后与对应 Entry 合并。
+Runner 通过库 Conversation.submit 接纳输入，稳定 requestId 用于重试查找 Submission；网络超时不能推断未接纳。Submission、Run、Task 与工作目标完成状态不同，目标完成由用户确认。
 
-同一 Conversation 的多端输入通过 submit 进入 Runner 上同一个 pi.inbox，不按设备时钟假定执行顺序。不同 Conversation 的执行由 Harness 调度；首发不自建总并发调度器。全局执行上限待库公开能力验证，不视为已实现保证。
+未来客户端明确区分本机待发送、Relay 等待、Runner 已接纳及回答/拒绝状态。网络 Outbox 只负责投递，不替代 pi.inbox。多个执行的调度由 Harness 提供，不自建全局调度器，也不承诺尚未验证的总执行上限。
 
-正在生成的回复和工具状态通过 Projection 同步。断线不停止 Run，重连拉取更新；最后同步的“运行中”状态需同时标注 Runner 的在线状态，不能当作当前存活证明。
+UI 断线不停止执行；Runner 真正离线时，未来 Relay 可以保存请求等待接纳。手机退出或进入后台只影响自身同步，后台行为受移动系统限制。多端可靠性、配对、撤销和迟到控制仍需专项设计与验证，见[多端与 Relay](architecture/02-multi-device.md)。
 
-## 工作目标与控制
+## 扩展与验收范围
 
-用户可直接创建带目标的 Conversation 并开始运行，也可为已有 Conversation 添加目标。工作管理入口展示目标、状态和相关执行视图。
+第一阶段只装配随 Runner 发布的 Extension 和 Tool。新注册能力不自动授予旧 Bot；精确能力列表、模型和所属 Extension 需要校验。当前采用 DeepSeek 与编码工具，不纳入计划模式；Skill/MCP 是未来独立适配，不能等同于 Extension 自动可用。暂不设计任意脚本动态加载、逐 Bot 工具审批、多租户、服务端部署或沙箱。
 
-Submission done、Run 结束或 Task completed 不自动意味着目标完成；首发由用户确认。
+本机验收需覆盖文件初始化与重载、冲突保护、无效配置修复、指令快照、Bot 缺失、共享工作区、独立后台连接与重复启动排除。生命周期验收需分别验证 UI 退出后继续执行、显式停止、重开恢复以及独立取消；safe replay 和 interrupted 工具遵循库契约。macOS arm64 已完成 release `.app` 构建和打包产物冒烟；真实 Provider、interrupted 工具和其他平台结果仍需独立报告，不从旧测试推导。
 
-已接纳工作使用 Submission.abort 或 Conversation.abort。停止请求送达 Runner 后按库的当前状态与作用范围返回结果；Runner 离线时不宣称停止生效，也不把迟到的停止请求自动作用到新的工作。
-
-客户端仅能直接移除尚未上传的本机输入；输入上传或被接纳后，按实际提交状态查询和控制，不承诺应用自建的跨网络回滚。
-
-## 离线与生命周期
-
-Relay 可达而 Runner 离线时，客户端仍可同步历史并提交待执行输入。网络不可用时，输入保存在本机 Outbox，恢复连接后上传；已经下载的历史仍可阅读，未同步内容不能假装可用。
-
-保留已确认的生命周期：关闭桌面应用窗口进入退出路径，不维持托盘常驻；Runner 停止本机执行与同步。Relay 和其他 Device 不随它退出。桌面重新启动后恢复已接纳的持久化工作，并接收等待中的请求。
-
-退出关闭 Harness，不等同于主动 abort 全部工作。手机退到后台或退出只影响它的同步，具体后台能力受系统限制；不承诺后台常驻或首发推送。
-
-## 扩展与目录
-
-不另建逐 Bot 工具审批体系；采用启用的 Extension/Tool 及其执行约定。设备认证与远程请求校验仍是多端访问必需边界。
-
-cwd 仅是默认工作目录，不提供目录外访问阻断或 OS 沙箱。Skill/MCP 接入需要适配，不能因依赖存在而声称已有能力。
-
-## 验收范围
-
-- 两个不同配置的 Bot 可以分别创建多个 Conversation，配置快照与归档语义正确。
-- 桌面和手机跨网络查看同一 Conversation，提交结果最终一致。
-- 客户端断网、Runner 离线及 Relay 重启后，输入可继续投递且不重复成为 Submission。
-- 回复、工具和目标状态可同步；慢设备和断线不阻塞执行。
-- 退出后停止执行，重启后恢复；覆盖 safe replay 与 interrupted 工具。
-- 设备配对、撤销、请求签名校验与凭据不进入聊天 Projection 可验证。
-- 停止与撤回状态真实；目标完成仍由用户确认。
-
-## 后续范围
-
-首发不承诺多 Runner 调度/迁移、群聊、外部消息渠道、独立常驻服务、调度、主动推送、OS 隔离、独立长期记忆系统或跨 Bot 自动协作。
-
-具体工程边界与待验证项见[架构总览](architecture/00-overview.md)。多端和离线投递是应用目标；端到端导出可靠性、迟到控制请求和打包需验证，不因使用 pi-durable 就宣称全部网络能力现成。
+多端、外部消息渠道、定时触发、主动推送、多 Runner 调度/迁移、独立长期记忆与自动跨 Bot 协作仍为后续范围。

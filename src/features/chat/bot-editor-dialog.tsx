@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { Bot, BotDraft, RunnerCapabilities } from "@/app/runner-client";
+import type { Bot, BotDefaults, BotDraft, RunnerCapabilities } from "@/app/runner-client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,6 +17,7 @@ type Props = {
   open: boolean;
   bot: Bot | null;
   capabilities: RunnerCapabilities;
+  defaults: BotDefaults;
   busy: boolean;
   error: string;
   onOpenChange: (open: boolean) => void;
@@ -28,6 +29,7 @@ export function BotEditorDialog({
   open,
   bot,
   capabilities,
+  defaults,
   busy,
   error,
   onOpenChange,
@@ -48,6 +50,7 @@ export function BotEditorDialog({
           key={bot?.id ?? "new"}
           bot={bot}
           capabilities={capabilities}
+          defaults={defaults}
           busy={busy}
           error={error}
           onSave={save}
@@ -74,16 +77,17 @@ export function BotEditorDialog({
 function BotEditorForm({
   bot,
   capabilities,
+  defaults,
   busy,
   error,
   onSave,
   onCancel,
-}: Pick<Props, "bot" | "capabilities" | "busy" | "error"> & {
+}: Pick<Props, "bot" | "capabilities" | "defaults" | "busy" | "error"> & {
   onSave: (draft: BotDraft) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [draft, setDraft] = useState(() => initializeBotDraft(bot, capabilities));
-  const { name, modelId, thinkingLevel, instructions, cwd, extensions, tools } = draft;
+  const [draft, setDraft] = useState(() => initializeBotDraft(bot, defaults));
+  const { name, provider, modelId, thinkingLevel, instructions, cwd, extensions, tools } = draft;
   const selectedExtensions = new Set(extensions);
   const selectedTools = new Set(tools);
   function updateDraft<K extends keyof BotDraft>(field: K, value: BotDraft[K]) {
@@ -118,17 +122,26 @@ function BotEditorForm({
         required
         value={name}
       />
+      {bot && (
+        <p className="text-muted-foreground text-xs break-all">配置版本：{bot.configVersion}</p>
+      )}
+      <label className="block space-y-2 text-sm">
+        Provider 配置名称
+        <Input
+          aria-label="Provider 配置名称"
+          value={provider}
+          required
+          onChange={(event) => updateDraft("provider", event.target.value)}
+        />
+      </label>
       <label className="block space-y-2 text-sm">
         模型
-        <select
+        <Input
           aria-label="模型 ID"
-          className="bg-background h-9 w-full rounded-md border px-2"
           value={modelId}
+          required
           onChange={(event) => updateDraft("modelId", event.target.value)}
-        >
-          <option value="deepseek-chat">DeepSeek Chat</option>
-          <option value="deepseek-reasoner">DeepSeek Reasoner · 深度思考</option>
-        </select>
+        />
       </label>
       <label className="text-muted-foreground block text-xs">
         Thinking Level
@@ -204,7 +217,11 @@ function BotEditorForm({
         Conversation；已有对话需单独应用。
       </p>
       <div className="flex gap-2">
-        <Button className="flex-1" disabled={busy || !name.trim() || !modelId.trim()} type="submit">
+        <Button
+          className="flex-1"
+          disabled={busy || !name.trim() || !provider.trim() || !modelId.trim()}
+          type="submit"
+        >
           {bot?.id ? "保存智能体" : "创建智能体"}
         </Button>
         {bot?.id && (

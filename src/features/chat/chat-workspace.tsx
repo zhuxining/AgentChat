@@ -37,7 +37,7 @@ export function ChatWorkspace({ client }: { client: typeof runnerClient }) {
   }
 
   async function saveBot(draft: BotDraft) {
-    const saved = await actions.saveBot(editedBot?.id ?? null, draft);
+    const saved = await actions.saveBot(editedBot?.id ?? null, draft, editedBot?.configVersion);
     if (saved && !editedBot) setSearch("");
     return saved;
   }
@@ -95,23 +95,26 @@ export function ChatWorkspace({ client }: { client: typeof runnerClient }) {
           onClose={() => setInspectorOpen(false)}
         />
       )}
-      <BotEditorDialog
-        key={editor.session}
-        open={botDialogOpen}
-        bot={editedBot}
-        capabilities={catalog.capabilities}
-        busy={connection.busy}
-        error={feedback.error}
-        onOpenChange={setBotDialogOpen}
-        onSave={saveBot}
-        onArchive={actions.archiveBot}
-      />
+      {catalog.botDefaults && (
+        <BotEditorDialog
+          key={editor.session}
+          open={botDialogOpen}
+          bot={editedBot}
+          capabilities={catalog.capabilities}
+          defaults={catalog.botDefaults}
+          busy={connection.busy || connection.runnerUnavailable}
+          error={feedback.error}
+          onOpenChange={setBotDialogOpen}
+          onSave={saveBot}
+          onArchive={actions.archiveBot}
+        />
+      )}
       <NewChatDialog
         open={chatDialogOpen}
         bots={catalog.bots}
         selectedBotId={selection.selectedBotId}
         busy={connection.busy}
-        runnerUnavailable={connection.runnerUnavailable}
+        runnerUnavailable={connection.runnerUnavailable || !connection.ready}
         error={feedback.error}
         onOpenChange={setChatDialogOpen}
         onSelectBot={actions.selectBot}
@@ -122,6 +125,7 @@ export function ChatWorkspace({ client }: { client: typeof runnerClient }) {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         connection={connection}
+        configuration={catalog.configuration}
         feedback={feedback}
         actions={actions}
       />

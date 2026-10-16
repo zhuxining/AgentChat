@@ -13,9 +13,19 @@ use std::time::{Duration, Instant};
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum RunnerRequest {
     Initialize,
+    ReloadConfiguration,
+    ReadConfiguration {
+        path: String,
+    },
+    SaveConfiguration {
+        path: String,
+        version: String,
+        content: String,
+    },
     CreateBot {
         name: String,
         model_id: String,
+        provider: String,
         instructions: String,
         cwd: String,
         thinking_level: String,
@@ -24,8 +34,10 @@ pub enum RunnerRequest {
     },
     UpdateBot {
         bot_id: String,
+        config_version: String,
         name: String,
         model_id: String,
+        provider: String,
         instructions: String,
         cwd: String,
         thinking_level: String,
@@ -34,6 +46,7 @@ pub enum RunnerRequest {
     },
     ArchiveBot {
         bot_id: String,
+        config_version: String,
     },
     CreateConversation {
         bot_id: String,
@@ -75,6 +88,16 @@ pub enum RunnerRequest {
 impl RunnerRequest {
     pub fn validate(&self) -> Result<(), String> {
         let valid_text = |value: &str, max: usize| value.len() <= max;
+        if let Self::CreateBot { provider, .. } | Self::UpdateBot { provider, .. } = self {
+            if provider.trim().is_empty() || provider.len() > 480 {
+                return Err("Provider 名称无效".to_owned());
+            }
+        }
+        if let Self::UpdateBot { config_version, .. } = self {
+            if config_version.is_empty() || config_version.len() > 256 {
+                return Err("配置版本无效".to_owned());
+            }
+        }
         let valid_bot = |name: &str,
                          model_id: &str,
                          instructions: &str,
@@ -121,6 +144,7 @@ impl RunnerRequest {
                 thinking_level,
                 extensions,
                 tools,
+                ..
             } => valid_bot(
                 name,
                 model_id,
@@ -139,6 +163,7 @@ impl RunnerRequest {
                 thinking_level,
                 extensions,
                 tools,
+                ..
             } => {
                 if bot_id.trim().is_empty() || !valid_text(bot_id, 400) {
                     return Err("Bot ID 无效".to_owned());
@@ -153,9 +178,16 @@ impl RunnerRequest {
                     tools,
                 )?;
             }
-            Self::ArchiveBot { bot_id } => {
-                if bot_id.trim().is_empty() || !valid_text(bot_id, 400) {
-                    return Err("Bot ID 无效".to_owned());
+            Self::ArchiveBot {
+                bot_id,
+                config_version,
+            } => {
+                if bot_id.trim().is_empty()
+                    || !valid_text(bot_id, 400)
+                    || config_version.is_empty()
+                    || config_version.len() > 256
+                {
+                    return Err("Bot ID 或配置版本无效".to_owned());
                 }
             }
             Self::CreateConversation { bot_id, cwd, goal } => {
@@ -195,7 +227,21 @@ impl RunnerRequest {
                     return Err("Provider 凭据无效".to_owned());
                 }
             }
+            Self::ReadConfiguration { path } | Self::SaveConfiguration { path, .. } => {
+                if path.is_empty() || !valid_text(path, 8_000) {
+                    return Err("配置路径无效".to_owned());
+                }
+                if let Self::SaveConfiguration {
+                    version, content, ..
+                } = self
+                {
+                    if version.is_empty() || version.len() > 256 || content.len() > 900_000 {
+                        return Err("配置版本或内容无效".to_owned());
+                    }
+                }
+            }
             Self::Initialize
+            | Self::ReloadConfiguration
             | Self::ApplyBotSettings { .. }
             | Self::AbortSubmission { .. }
             | Self::Snapshot { .. }
@@ -236,7 +282,7 @@ impl WireResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RunnerReply {
     pub result: Value,
 }
@@ -251,104 +297,6 @@ pub struct RunnerProcess {
     next_id: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
     shutdown_started: Arc<AtomicBool>,
-}
-
-pub struct RunnerState {
-    process: Mutex<Option<RunnerProcess>>,
-    startup_error: Mutex<Option<String>>,
-    credential_warning: Mutex<Option<String>>,
-    data_dir: PathBuf,
-    resource_dir: PathBuf,
-}
-
-impl RunnerState {
-    pub fn new(
-        data_dir: PathBuf,
-        resource_dir: PathBuf,
-        api_key: Option<String>,
-        credential_warning: Option<String>,
-    ) -> Self {
-        let (process, startup_error) = match RunnerProcess::spawn(&data_dir, &resource_dir, api_key)
-        {
-            Ok(process) => (Some(process), None),
-            Err(error) => (None, Some(error)),
-        };
-        Self {
-            process: Mutex::new(process),
-            startup_error: Mutex::new(startup_error),
-            credential_warning: Mutex::new(credential_warning),
-            data_dir,
-            resource_dir,
-        }
-    }
-
-    pub fn process(&self) -> Result<RunnerProcess, String> {
-        let process = self
-            .process
-            .lock()
-            .map_err(|_| "Runner 状态不可用".to_owned())?;
-        process.as_ref().cloned().ok_or_else(|| {
-            self.startup_error
-                .lock()
-                .ok()
-                .and_then(|error| error.clone())
-                .unwrap_or_else(|| "Runner 尚未启动".to_owned())
-        })
-    }
-
-    pub fn credential_warning(&self) -> Option<String> {
-        self.credential_warning
-            .lock()
-            .ok()
-            .and_then(|warning| warning.clone())
-    }
-
-    pub fn set_credential_warning(&self, value: Option<String>) {
-        if let Ok(mut warning) = self.credential_warning.lock() {
-            *warning = value;
-        }
-    }
-
-    pub fn clear_credential_warning(&self) {
-        self.set_credential_warning(None);
-    }
-
-    pub fn restart(&self, api_key: Option<String>) -> Result<(), String> {
-        let mut process = self
-            .process
-            .lock()
-            .map_err(|_| "Runner 状态不可用".to_owned())?;
-        if let Some(previous) = process.take() {
-            previous.shutdown();
-        }
-        match RunnerProcess::spawn(&self.data_dir, &self.resource_dir, api_key) {
-            Ok(next) => {
-                *process = Some(next);
-                if let Ok(mut error) = self.startup_error.lock() {
-                    *error = None;
-                }
-                self.clear_credential_warning();
-                Ok(())
-            }
-            Err(error) => {
-                if let Ok(mut startup_error) = self.startup_error.lock() {
-                    *startup_error = Some(error.clone());
-                }
-                Err(error)
-            }
-        }
-    }
-
-    pub fn shutdown(&self) {
-        let process = self
-            .process
-            .lock()
-            .ok()
-            .and_then(|mut process| process.take());
-        if let Some(process) = process {
-            process.shutdown();
-        }
-    }
 }
 
 impl RunnerProcess {
@@ -381,11 +329,33 @@ impl RunnerProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        Self::spawn_command(&mut command, api_key)
+    }
+
+    pub(crate) fn spawn_command(
+        command: &mut Command,
+        api_key: Option<String>,
+    ) -> Result<Self, String> {
         let mut child = command
             .spawn()
             .map_err(|error| format!("启动 Node Runner 失败：{error}"))?;
         let stdin = child.stdin.take().ok_or("Runner 标准输入不可用")?;
         let stdout = child.stdout.take().ok_or("Runner 标准输出不可用")?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            // Nonblocking pipes keep a stalled Node process from blocking host shutdown.
+            let fd = stdin.as_raw_fd();
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags == -1
+                || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+            {
+                let error = std::io::Error::last_os_error();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("设置 Runner 输入通道失败：{error}"));
+            }
+        }
         let pending: Pending = Arc::default();
         let closed = Arc::new(AtomicBool::new(false));
         let pending_reader = Arc::clone(&pending);
@@ -433,10 +403,16 @@ impl RunnerProcess {
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
-        self.pending
-            .lock()
-            .map_err(|_| "Runner 响应队列不可用".to_owned())?
-            .insert(id, sender);
+        {
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| "Runner 响应队列不可用".to_owned())?;
+            if pending.len() >= 64 {
+                return Err("Runner 请求过多，请稍后重试".to_owned());
+            }
+            pending.insert(id, sender);
+        }
 
         let message = match serde_json::to_vec(&WireRequest { id, request }) {
             Ok(message) => message,
@@ -445,22 +421,14 @@ impl RunnerProcess {
                 return Err(format!("编码 Runner 请求失败：{error}"));
             }
         };
-        let write_result = self
-            .stdin
-            .lock()
-            .map_err(|_| "Runner 输入通道不可用".to_owned())
-            .and_then(|mut stdin| {
-                if self.closed.load(Ordering::Acquire) && !allow_closing {
-                    return Err("Runner 已关闭".to_owned());
-                }
-                stdin
-                    .write_all(&message)
-                    .and_then(|()| stdin.write_all(b"\n"))
-                    .and_then(|()| stdin.flush())
-                    .map_err(|error| format!("发送 Runner 请求失败：{error}"))
-            });
-        if let Err(error) = write_result {
+        if message.len() >= 1_048_576 {
             self.remove_pending(id);
+            return Err("Runner 请求超过大小限制".to_owned());
+        }
+        let write_result = self.write_message(&message, allow_closing);
+        if let Err(error) = write_result {
+            self.closed.store(true, Ordering::Release);
+            self.fail_pending("Runner 输入通道已失效".to_owned());
             return Err(error);
         }
 
@@ -476,6 +444,43 @@ impl RunnerProcess {
             }
         };
         Ok(RunnerReply { result })
+    }
+
+    fn write_message(&self, message: &[u8], allow_closing: bool) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stdin = loop {
+            match self.stdin.try_lock() {
+                Ok(stdin) => break stdin,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("Runner 输入通道不可用".to_owned())
+                }
+                Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(5))
+                }
+                Err(_) => return Err("等待 Runner 输入通道超时".to_owned()),
+            }
+        };
+        if self.closed.load(Ordering::Acquire) && !allow_closing {
+            return Err("Runner 已关闭".to_owned());
+        }
+        let mut frame = message.to_vec();
+        frame.push(b'\n');
+        let mut remaining = frame.as_slice();
+        while !remaining.is_empty() {
+            if Instant::now() >= deadline {
+                return Err("发送 Runner 请求超时".to_owned());
+            }
+            match stdin.write(remaining) {
+                Ok(0) => return Err("Runner 输入通道已关闭".to_owned()),
+                Ok(written) => remaining = &remaining[written..],
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => return Err(format!("发送 Runner 请求失败：{error}")),
+            }
+        }
+        Ok(())
     }
 
     pub fn shutdown(&self) {
@@ -504,6 +509,7 @@ impl RunnerProcess {
                 }
             }
         }
+        eprintln!("Runner 未能正常收尾，终止失效的子进程；下次启动由 Harness 检查恢复状态");
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();
@@ -585,7 +591,7 @@ fn read_responses(stdout: impl std::io::Read, pending: Pending, closed: Arc<Atom
     fail_waiters(&pending, "Runner 已断开".to_owned());
 }
 
-fn read_bounded_line(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
+pub(crate) fn read_bounded_line(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
     const MAX_LINE_BYTES: usize = 1_048_576;
     let mut line = Vec::new();
     loop {
@@ -670,6 +676,7 @@ mod tests {
             request: RunnerRequest::CreateBot {
                 name: "助手".to_owned(),
                 model_id: "test-model".to_owned(),
+                provider: "deepseek".to_owned(),
                 instructions: "".to_owned(),
                 cwd: "".to_owned(),
                 thinking_level: "medium".to_owned(),

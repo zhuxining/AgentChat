@@ -1,46 +1,87 @@
 # AgentChat
 
-AgentChat 是本机 Agent 工作台。本仓库当前实现桌面本地切片：由 Tauri 管理 Node Runner，Runner 使用 pi-durable 和 SQLite 承载多个 Bot Conversation。
+AgentChat 是本机 Agent 工作台。桌面 UI 连接独立后台 Runner；原生宿主管理本机连接、进程和系统凭据，Node Runner 使用 pi-durable Harness 与 SQLite 执行工作。关闭窗口或退出 UI 后，Runner 继续运行。
 
-## 桌面开发与打包
+## 开发与构建
 
-需要 Bun 1.4.2、Rust 工具链，以及当前平台的 Tauri 桌面构建依赖。首次安装会按当前平台下载锁定在 `bun.lock` 中的 Node 22.19.0 runtime。
+需要 Bun 1.4.2、Rust 工具链和当前平台的 Tauri 构建依赖。项目使用最小 Bun Workspaces，根目录为前端，`runner/` 为独立 Node package，共用 `bun.lock`。
 
 ```bash
 bun install
-vpr tauri dev
+bun run tauri dev
+bun run build
+bun run test
+bun run check
+```
+
+`bun run build` 检查并构建前端与 Runner、暂存锁定的 Node 22.19.0 runtime。`bun run test` 聚合 UI 与 Runner 测试。macOS 可用以下命令构建 `.app`：
+
+```bash
 bun run tauri build --bundles app
 ```
 
-最后一条在 macOS 生成 `.app`。请在目标操作系统和 CPU 架构上构建安装包；当前 Runner runtime 按 macOS arm64/x64、Windows x64、Linux arm64/x64 分发。桌面开发和发布包都使用随项目安装或打包的 Node runtime，不依赖开发机 PATH 中的 Node。
+开发和分发均使用项目暂存或打包的 Node，不依赖 PATH 中的 Node。runtime 依赖包含多个平台的二进制，不代表所有平台已可运行：**当前本机 IPC 实现为 Unix socket；Windows 本机 IPC 尚未实现**。macOS arm64 的 release `.app` 已完成构建与打包产物冒烟；Linux、Windows 和其他架构仍需在目标平台验证。
 
-## 当前桌面功能
+Tauri 的版本检查要求 Rust crate 与对应的 `@tauri-apps/*` 包处于同一 major.minor，因此 `src-tauri/Cargo.toml` 用 `~` 固定到 `package.json` 声明的 minor。升级任一侧时必须同步另一侧，并保留 `Cargo.lock`：`tauri-plugin-updater` 的可选 Windows 依赖 `zip ^4` 目前所有已发布版本都被 yank，全量 `cargo update` 无法重新解析，只能依赖锁文件中已固定的 `zip 4.6.1`。
 
-- 创建、编辑和归档 Bot，选择模型、Thinking Level、instructions、Extension、Tool 和默认工作目录。
-- 从 Bot 创建 Conversation；Bot 配置作为快照保存，空闲时可显式应用后续更改。
-- 三栏聊天界面：左侧搜索和切换会话、中间消息与输入框、右侧可折叠的智能体资料和运行配置，使用现有 shadcn 组件默认样式。
-- 提交输入、查看接纳及执行状态、撤回排队输入或停止 Conversation。
-- 保存 Conversation 工作目标，由用户明确标记完成。
-- 使用 DeepSeek Chat / Reasoner，将 API Key 保存到系统凭据库或从宿主环境变量读取，由 Runner 使用。
-- 关闭时关闭 Harness，重新启动时打开 SQLite 并恢复未完成工作。
+## 使用与生命周期
 
-`cwd` 只是工具默认工作目录，不构成文件访问隔离。当前内置 Extension 提供 `read`、`write`、`edit` 和 `bash` 工具。
+桌面启动先连接同一数据目录的已有后台实例，未运行时再启动；UI 断开不会关闭 Harness。同一数据目录只允许一个后台实例持有执行 Storage。
 
-## 源码职责
+- 在设置中保存 DeepSeek API Key；密钥进入系统凭据库，不写入 JSON 或聊天数据。Linux 需要可用的 Secret Service。
+- 创建 Bot 时，将 Runner 默认模型、指令与能力选择写入该 Bot 的配置，并分配稳定工作区。当前模型入口为 DeepSeek Chat / Reasoner，默认编码工具为 `bash`、`edit`、`read`、`write`。
+- 从 Bot 创建执行会话；既有执行保存配置快照，空闲时通过“应用最新智能体设置”显式更新。
+- 设置中的“停止后台 Runner”调用 Harness close 并收尾，保留未完成工作的恢复状态。取消工作或撤回输入是独立操作。
+- 使用“重新启动并连接”停止并重新打开后台；停止后该按钮显示“启动并连接”。退出 UI 后如需停止后台，可重新打开 UI 进入设置操作。
 
-- `src/App.tsx`：装配桌面聊天入口和 Runner Adapter。
-- `src/features/chat/chat-workspace.tsx`：组合三栏和弹窗，管理面板开关与编辑对象。
-- `src/features/chat/use-workspace.ts`：统一管理 Runner 同步、会话选择、消息重试和跨视图操作；通过传入的 Runner Adapter 访问宿主。
-- `src/features/chat/` 中其余视图：会话列表、聊天、资料栏及智能体、新聊天、设置弹窗；表单自行管理草稿。
-- `src/app/runner-client.ts`：集中定义前端请求类型与 Tauri IPC 适配。
-- `runner/src/application.ts`：组合 Harness 并处理应用请求；Provider 凭据、Agent 配置、Document 定义、Bot 校验及消息投影分别放在对应文件中。
+产品聊天窗口是持续对话入口，可以容纳多个会话；它与库 `Conversation` 的关系不预设为一一对应。当前本地 UI 保留执行会话的创建、选择和状态展示，连续窗口的进一步产品交互按后续设计落地。
 
-界面行为通过 `tests/ui/submission.test.ts` 验证，Runner 行为通过 `createApplicationRunner` 的请求入口验证。内部拆分不改变 IPC 或 SQLite Document 格式。
+## 配置与本机数据
 
-## 本机数据与凭据
+默认数据目录为 `~/.agentchat`。可在启动 UI 前设置绝对路径覆盖：
 
-pi-durable SQLite 数据保存在 Tauri 应用数据目录下的 `runner/agentchat.sqlite`。Provider 密钥存储在操作系统凭据库中；Linux 桌面需要可用的 Secret Service。`DEEPSEEK_API_KEY` 进程环境变量可作为本机开发配置来源；启动 Tauri 的进程必须实际继承该变量，Shell 配置中的注释行不会生效。密钥通过私有 IPC 传给 Runner，工具进程不会继承该密钥。
+```bash
+AGENTCHAT_DATA_DIR=/absolute/path/agentchat-dev bun run tauri dev
+```
 
-旧 OpenAI Bot 与 Conversation 保留原配置。继续使用前，编辑智能体选择 DeepSeek 模型，并在会话空闲时点击“应用最新智能体设置”；也可用新智能体创建聊天。
+切换目录不会迁移旧数据，也不会停止另一个目录的后台实例。这是新项目，不提供旧配置或旧数据库迁移。
 
-本机已验证 macOS `.app` 包含 Runner 资源，并能启动 Runner、打开 SQLite 和正常退出；Harness 在 Runner 进程关闭/重开时的未完成工作恢复已有确定性测试，但尚未验证 Tauri 应用实际重启场景。已通过真实 DeepSeek Chat / Reasoner 的 Runner 发消息验证，以及 macOS 桌面输入框到 DeepSeek 回复的完整链路验证。当前环境的默认 DMG 打包步骤未通过，Windows/Linux 目标也尚未验证。
+```text
+~/.agentchat/
+├─ runner.json                 # Runner 默认值、Provider 声明、Harness settings
+├─ bots/
+│  └─ <bot-id>/
+│     ├─ bot.json              # Bot 档案与默认 Agent 配置
+│     └─ instructions.md       # 可选独立指令文件
+├─ workspaces/<bot-id>/         # 自动分配的稳定工作区
+├─ state/runner.sqlite         # 执行事实与已确定的配置
+├─ logs/host.log               # 后台诊断
+└─ run/                        # 本机 socket 与实例锁
+```
+
+JSON 是期望配置的权威来源，既支持独立编辑，也支持 UI 经 Runner 保存同一份文件。操作步骤：
+
+1. 启动一次应用生成 `runner.json`；创建 Bot 后生成 `bots/<id>/bot.json`。
+2. 编辑文件。Bot 指令使用 `instructions` 或 `instructionsFile`，两者必须且只能选择一个；独立指令路径相对 Bot 目录解析。
+3. 在设置点击“重载配置”，检查路径和字段诊断。第一阶段不监听文件变化。
+4. Harness settings 在下次读取时生效；已有执行需显式应用 Bot 配置；Provider 声明变化需重启后台。
+
+UI 保存携带内容版本，文件被外部编辑后拒绝过期覆盖；Runner 采用原子替换写入。无效修改不覆盖已加载的有效配置；冷启动无效 Bot 可诊断并修复，必要 Runner 配置无效时不启动执行。删除 Bot 文件不删除历史或自动取消工作。具体字段、示例与异常规则见[配置与 Harness 集成](docs/architecture/01-pi-durable.md)。
+
+同一 Bot 的多个执行默认共享工作区；`cwd` 是执行位置，不提供文件访问或并发隔离。外部项目可以直接作为工作区使用。
+
+`DEEPSEEK_API_KEY` 可作为本机开发凭据来源，由后台宿主启动时继承；修改环境变量后需重启后台。密钥经私有进程通信进入 Provider 认证闭包，工具环境不继承该密钥。
+
+## 源码与验证边界
+
+- `src/features/chat/`：聊天工作台、Bot 编辑、设置与配置编辑；`src/app/runner-client.ts` 集中适配 Tauri IPC。
+- `src-tauri/src/host.rs`：独立原生后台宿主、本机 IPC 与凭据入口；`runner.rs` 管理其 Node 子进程和私有 JSONL 通信。
+- `runner/src/config/`：配置文件、校验、版本冲突、有效值与重载。
+- `runner/src/harness/`：models、Registry、settings、ExecutionEnv、Storage 装配，类型化操作和状态视图。
+- `runner/src/communication/`：外部请求校验、分发与私有 stdio 传输。
+
+UI 测试位于 `tests/`，Runner 测试位于 `runner/tests/`，Rust 模块内有协议和宿主测试。macOS 已使用临时数据目录验证独立后台、多客户端关联、配置读写与重载、停止、UI 进程退出后后台存活和重新连接；Harness 单元集成测试验证了已接纳工作的关闭/重开恢复。本轮未调用真实模型，工具中断的跨进程恢复仍待验证。
+
+前端/Node 与 Rust 构建通过；Tauri 打包的 JS/Rust 版本不匹配已修复（两侧统一在同一 major.minor），release `.app`（115.8 MiB）已在 macOS arm64 构建，并在临时目录完成打包产物冒烟：随包 Node 与 Runner 入口启动后台、创建 Bot 与会话、通过宿主读取配置、退出 UI 后后台存活、重连与显式停止。本轮未调用真实模型；手机、Device Core 与 Relay 尚未实现。
+
+设计入口：[产品蓝图](docs/PRODUCT_BLUEPRINT.md)、[架构总览](docs/architecture/00-overview.md)、[多端规划](docs/architecture/02-multi-device.md)、[术语表](GLOSSARY.md)。

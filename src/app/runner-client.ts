@@ -9,15 +9,19 @@ export type Bot = {
   cwd: string;
   extensions: string[];
   tools: string[];
-  revision: number;
   archived: boolean;
+  configVersion: string;
 };
-export type BotDraft = Omit<Bot, "id" | "model" | "revision" | "archived"> & { modelId: string };
+export type BotDraft = Omit<Bot, "id" | "model" | "archived" | "configVersion"> & {
+  provider: string;
+  modelId: string;
+};
+export type BotDefaults = Omit<BotDraft, "name">;
 export type ConversationSummary = {
   id: number;
   botId: string;
   botName: string;
-  botRevision: number;
+  botConfigVersion: string;
   createdAt: number;
 };
 export type RunnerCapabilities = {
@@ -35,7 +39,7 @@ export type ConversationSnapshot = {
     id: number;
     botId: string;
     botName: string;
-    botRevision: number;
+    botConfigVersion: string;
     agent: {
       model: { provider: string; modelId: string } | null;
       thinkingLevel: string;
@@ -66,8 +70,18 @@ export type ConversationSnapshot = {
   configurationErrors: { missingExtensions: string[]; missingTools: string[] };
   apiKeyConfigured: boolean;
 };
+export type ConfigurationStatus = {
+  errors: { path: string; message: string; botId?: string }[];
+  restartRequired: boolean;
+  dataDir: string;
+  files: string[];
+  ready: boolean;
+};
+export type ConfigurationFile = { path: string; version: string; content: string };
 export type InitializeResult = {
   bots: Bot[];
+  botDefaults: BotDefaults | null;
+  configuration: ConfigurationStatus;
   conversations: ConversationSummary[];
   capabilities: RunnerCapabilities;
   apiKeyConfigured: boolean;
@@ -77,9 +91,12 @@ export type InitializeResult = {
 
 export type RunnerRequest =
   | { op: "initialize" }
+  | { op: "reloadConfiguration" }
+  | { op: "readConfiguration"; path: string }
+  | { op: "saveConfiguration"; path: string; version: string; content: string }
   | ({ op: "createBot" } & BotDraft)
-  | ({ op: "updateBot"; botId: string } & BotDraft)
-  | { op: "archiveBot"; botId: string }
+  | ({ op: "updateBot"; botId: string; configVersion: string } & BotDraft)
+  | { op: "archiveBot"; botId: string; configVersion: string }
   | { op: "createConversation"; botId: string; cwd: string; goal: string }
   | { op: "applyBotSettings"; conversationId: number }
   | { op: "saveGoal"; conversationId: number; description: string }
@@ -98,14 +115,20 @@ async function request<T>(message: RunnerRequest): Promise<T> {
 
 export const runnerClient = {
   initialize: () => request<InitializeResult>({ op: "initialize" }),
+  reloadConfiguration: () => request<InitializeResult>({ op: "reloadConfiguration" }),
+  readConfiguration: (path: string) =>
+    request<ConfigurationFile>({ op: "readConfiguration", path }),
+  saveConfiguration: (path: string, version: string, content: string) =>
+    request<{ saved: boolean }>({ op: "saveConfiguration", path, version, content }),
   createBot: (input: BotDraft) => request<Bot>({ op: "createBot", ...input }),
-  updateBot: (botId: string, input: BotDraft) =>
-    request<{ bot: Bot; bots: Bot[] }>({ op: "updateBot", botId, ...input }),
-  archiveBot: (botId: string) => request<{ bots: Bot[] }>({ op: "archiveBot", botId }),
+  updateBot: (botId: string, input: BotDraft, configVersion: string) =>
+    request<{ bot: Bot; bots: Bot[] }>({ op: "updateBot", botId, ...input, configVersion }),
+  archiveBot: (botId: string, configVersion: string) =>
+    request<{ bots: Bot[] }>({ op: "archiveBot", botId, configVersion }),
   createConversation: (botId: string, cwd: string, goal: string) =>
     request<ConversationSummary>({ op: "createConversation", botId, cwd, goal }),
   applyBotSettings: (conversationId: number) =>
-    request<{ botRevision: number }>({ op: "applyBotSettings", conversationId }),
+    request<{ botConfigVersion: string }>({ op: "applyBotSettings", conversationId }),
   saveGoal: (conversationId: number, description: string) =>
     request<ConversationSnapshot["goal"]>({ op: "saveGoal", conversationId, description }),
   setGoalStatus: (conversationId: number, status: "open" | "completed") =>
@@ -123,5 +146,6 @@ export const runnerClient = {
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
   setProviderCredential: (apiKey: string | null) =>
     invoke<{ configured: boolean; runnerUpdated: boolean }>("set_provider_credential", { apiKey }),
+  stopRunner: () => invoke<void>("stop_runner"),
   restartRunner: () => invoke<void>("restart_runner"),
 };

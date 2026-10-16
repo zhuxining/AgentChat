@@ -11,7 +11,7 @@ import type { Workspace } from "@/features/chat/use-workspace";
 
 type Props = {
   selection: Pick<Workspace["selection"], "activeBot" | "snapshot">;
-  connection: Pick<Workspace["connection"], "busy" | "providerConfigured">;
+  connection: Pick<Workspace["connection"], "busy" | "providerConfigured" | "runnerUnavailable">;
   conversation: Workspace["conversation"];
   actions: Pick<Workspace["actions"], "applyBotSettings" | "saveGoal" | "setGoalStatus">;
   onEditBot: (bot: Bot) => void;
@@ -21,7 +21,7 @@ type Props = {
 
 export function BotInspector({
   selection: { activeBot, snapshot },
-  connection: { busy, providerConfigured },
+  connection: { busy, providerConfigured, runnerUnavailable },
   conversation: { hasLiveTasks, hasUpdatedBotSettings, goalDraft, setGoalDraft },
   actions: { applyBotSettings, saveGoal, setGoalStatus },
   onEditBot,
@@ -55,7 +55,9 @@ export function BotInspector({
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate font-medium">{activeBot?.name ?? "未选择智能体"}</p>
-                <p className="text-muted-foreground text-xs">DeepSeek · 本机</p>
+                <p className="text-muted-foreground text-xs">
+                  {activeBot?.model.provider ?? "Runner"} · 本机
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -79,6 +81,10 @@ export function BotInspector({
           <Card size="sm">
             <CardContent className="space-y-3">
               <InfoRow label="名称" value={activeBot?.name ?? "—"} />
+              <InfoRow
+                label="配置版本"
+                value={<span className="break-all">{activeBot?.configVersion ?? "—"}</span>}
+              />
               <Separator />
               <div>
                 <p className="text-muted-foreground mb-2 text-xs">描述</p>
@@ -98,7 +104,12 @@ export function BotInspector({
         <InspectorSection title="运行方式">
           <Card size="sm">
             <CardContent className="space-y-3">
-              <InfoRow label="服务商" value="DeepSeek" />
+              <InfoRow
+                label="服务商"
+                value={
+                  snapshot?.conversation.agent.model?.provider ?? activeBot?.model.provider ?? "—"
+                }
+              />
               <Separator />
               <InfoRow
                 label="模型"
@@ -139,7 +150,7 @@ export function BotInspector({
                   className="w-full"
                   variant="outline"
                   size="sm"
-                  disabled={busy || hasLiveTasks}
+                  disabled={busy || runnerUnavailable || hasLiveTasks}
                   onClick={() => void applyBotSettings()}
                 >
                   应用最新智能体设置
@@ -169,14 +180,16 @@ export function BotInspector({
                     <Button
                       size="sm"
                       type="submit"
-                      disabled={busy || goalDraft === snapshot.goal.description}
+                      disabled={
+                        busy || runnerUnavailable || goalDraft === snapshot.goal.description
+                      }
                     >
                       保存
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={busy || !snapshot.goal.description.trim()}
+                      disabled={busy || runnerUnavailable || !snapshot.goal.description.trim()}
                       onClick={() =>
                         void setGoalStatus(snapshot.goal.status === "open" ? "completed" : "open")
                       }

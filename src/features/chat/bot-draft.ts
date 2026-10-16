@@ -1,12 +1,11 @@
-import type { Bot, BotDraft, RunnerCapabilities } from "@/app/runner-client";
+import type { Bot, BotDefaults, BotDraft } from "@/app/runner-client";
 
-export const defaultInstructions = "用简体中文回答，先给出直接结论。";
-
-export function initializeBotDraft(bot: Bot | null, capabilities: RunnerCapabilities): BotDraft {
+export function initializeBotDraft(bot: Bot | null, defaults: BotDefaults): BotDraft {
   if (bot) {
     return {
       name: bot.name,
-      modelId: bot.model.provider === "deepseek" ? bot.model.modelId : "deepseek-chat",
+      provider: bot.model.provider,
+      modelId: bot.model.modelId,
       thinkingLevel: bot.thinkingLevel,
       instructions: bot.instructions,
       cwd: bot.cwd,
@@ -15,14 +14,9 @@ export function initializeBotDraft(bot: Bot | null, capabilities: RunnerCapabili
     };
   }
   return {
+    ...defaults,
     name: "",
-    modelId: "deepseek-chat",
-    thinkingLevel: "medium",
-    instructions: defaultInstructions,
-    cwd: "",
-    extensions: capabilities.extensions.includes("coding-tools") ? ["coding-tools"] : [],
-    tools: capabilities.tools
-      .filter((tool) => tool.extension === "coding-tools")
-      .map((tool) => tool.name),
+    extensions: [...defaults.extensions],
+    tools: [...defaults.tools],
   };
 }

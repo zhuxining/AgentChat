@@ -28,7 +28,7 @@ type Props = {
   selection: Pick<Workspace["selection"], "conversationId" | "snapshot">;
   connection: Pick<
     Workspace["connection"],
-    "busy" | "runnerUnavailable" | "providerConfigured" | "credentialWarning"
+    "busy" | "runnerUnavailable" | "ready" | "providerConfigured" | "credentialWarning"
   >;
   feedback: Workspace["feedback"];
   messaging: Workspace["messaging"];
@@ -45,7 +45,7 @@ type Props = {
 
 export function ChatPanel({
   selection: { conversationId, snapshot },
-  connection: { busy, runnerUnavailable, providerConfigured, credentialWarning },
+  connection: { busy, runnerUnavailable, ready, providerConfigured, credentialWarning },
   feedback: { error, notice, dismissNotice },
   messaging: {
     input,
@@ -92,7 +92,8 @@ export function ChatPanel({
             {snapshot?.conversation.botName ?? "AgentChat"}
           </h1>
           <p className="text-muted-foreground truncate text-xs">
-            DeepSeek · 本机{snapshot ? ` · ${executionStatus}` : ""}
+            {snapshot?.conversation.agent.model?.provider ?? "Runner"} · 本机
+            {snapshot ? ` · ${executionStatus}` : ""}
           </p>
         </div>
         {hasLiveTasks && (
@@ -213,7 +214,10 @@ export function ChatPanel({
                 <p className="text-muted-foreground mt-2 text-sm">使用 DeepSeek，开始一次对话。</p>
               </div>
               {!snapshot && (
-                <Button disabled={busy || runnerUnavailable} onClick={() => void startChat()}>
+                <Button
+                  disabled={busy || runnerUnavailable || !ready}
+                  onClick={() => void startChat()}
+                >
                   <PlusIcon />
                   开始聊天
                 </Button>
@@ -265,7 +269,9 @@ export function ChatPanel({
           <InputGroupTextarea
             aria-label="发送消息"
             className="max-h-40 min-h-16"
-            disabled={!snapshot || busy || pendingSubmission !== null}
+            disabled={
+              !snapshot || busy || runnerUnavailable || !ready || pendingSubmission !== null
+            }
             placeholder={`发送消息给 ${snapshot?.conversation.botName ?? "智能体"}`}
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -295,6 +301,8 @@ export function ChatPanel({
               disabled={
                 !snapshot ||
                 busy ||
+                runnerUnavailable ||
+                !ready ||
                 !input.trim() ||
                 (pendingSubmission !== null && pendingSubmission.conversationId !== conversationId)
               }

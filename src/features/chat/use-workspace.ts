@@ -3,13 +3,15 @@ import { useEffect, useState } from "react";
 import type {
   Bot,
   BotDraft,
+  BotDefaults,
+  ConfigurationStatus,
   ConversationSnapshot,
   ConversationSummary,
   InitializeResult,
   RunnerCapabilities,
   runnerClient,
 } from "@/app/runner-client";
-import { defaultInstructions } from "@/features/chat/bot-draft";
+import { initializeBotDraft } from "@/features/chat/bot-draft";
 
 type RunnerClient = typeof runnerClient;
 type PendingSubmission = { conversationId: number; text: string; requestId: string };
@@ -17,6 +19,10 @@ type PendingSubmission = { conversationId: number; text: string; requestId: stri
 // Owns Runner synchronization and cross-view workflows. Views submit user intent rather than
 // coordinating IPC ordering, polling, accepted-input retries, or partial Bot creation themselves.
 export function useWorkspace(client: RunnerClient) {
+  const [botDefaults, setBotDefaults] = useState<BotDefaults | null>(null);
+  const [configuration, setConfiguration] = useState<ConfigurationStatus | null>(null);
+  const [pollingPaused, setPollingPaused] = useState(false);
+  const [runnerStopped, setRunnerStopped] = useState(false);
   const [bots, setBots] = useState<Bot[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [capabilities, setCapabilities] = useState<RunnerCapabilities>({
@@ -33,6 +39,7 @@ export function useWorkspace(client: RunnerClient) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pollingError, setPollingError] = useState("");
   const [notice, setNotice] = useState("");
   const [input, setInput] = useState("");
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
@@ -47,6 +54,8 @@ export function useWorkspace(client: RunnerClient) {
   }>({ conversationId: null, updatedAt: null, value: "" });
 
   function acceptCatalog(initial: InitializeResult) {
+    setBotDefaults(initial.botDefaults);
+    setConfiguration(initial.configuration);
     setBots(initial.bots);
     setConversations(initial.conversations);
     setCapabilities(initial.capabilities);
@@ -54,6 +63,7 @@ export function useWorkspace(client: RunnerClient) {
     setRuntimeVersion(initial.runtimeVersion);
     setCredentialWarning(initial.credentialWarning ?? "");
     setRunnerUnavailable(false);
+    setPollingError("");
   }
 
   useEffect(() => {
@@ -81,7 +91,7 @@ export function useWorkspace(client: RunnerClient) {
   }, [client]);
 
   useEffect(() => {
-    if (conversationId === null) return;
+    if (conversationId === null || pollingPaused) return;
     let active = true;
     let timer: number | undefined;
     const refresh = async () => {
@@ -91,12 +101,12 @@ export function useWorkspace(client: RunnerClient) {
           setStoredSnapshot(value);
           setProviderConfigured(value.apiKeyConfigured);
           setRunnerUnavailable(false);
-          setError("");
+          setPollingError("");
         }
       } catch (cause) {
         if (active) {
           setRunnerUnavailable(true);
-          setError(errorMessage(cause));
+          setPollingError(errorMessage(cause));
         }
       } finally {
         if (active) timer = window.setTimeout(() => void refresh(), 1_200);
@@ -107,7 +117,7 @@ export function useWorkspace(client: RunnerClient) {
       active = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [client, conversationId]);
+  }, [client, conversationId, pollingPaused]);
 
   const snapshot = storedSnapshot?.conversation.id === conversationId ? storedSnapshot : null;
   const selectedBot = bots.find((bot) => bot.id === selectedBotId && !bot.archived);
@@ -116,7 +126,7 @@ export function useWorkspace(client: RunnerClient) {
   const hasLiveTasks = (snapshot?.activeTasks.length ?? 0) > 0;
   const executing = snapshot?.activeTasks.some((task) => task.status === "running") ?? false;
   const hasUpdatedBotSettings = Boolean(
-    snapshot && linkedBot && linkedBot.revision !== snapshot.conversation.botRevision,
+    snapshot && linkedBot && linkedBot.configVersion !== snapshot.conversation.botConfigVersion,
   );
   const currentAcceptedSubmissionId =
     acceptedSubmission?.conversationId === conversationId ? acceptedSubmission.id : null;
@@ -154,11 +164,12 @@ export function useWorkspace(client: RunnerClient) {
     setConversationId(created.id);
   }
 
-  function saveBot(botId: string | null, draft: BotDraft) {
+  function saveBot(botId: string | null, draft: BotDraft, configVersion?: string) {
     setNotice("");
     return runAction(async () => {
       if (botId) {
-        const result = await client.updateBot(botId, draft);
+        if (!configVersion) throw new Error("缺少配置版本，请重新打开智能体编辑框。");
+        const result = await client.updateBot(botId, draft, configVersion);
         setBots(result.bots);
         setSelectedBotId(result.bot.id);
         setNotice(`已保存 ${result.bot.name} 的新配置。现有 Conversation 不会自动改变。`);
@@ -182,15 +193,8 @@ export function useWorkspace(client: RunnerClient) {
     return runAction(async () => {
       let bot = selectedBot;
       if (!bot) {
-        bot = await client.createBot({
-          name: "幕僚长",
-          modelId: "deepseek-chat",
-          thinkingLevel: "medium",
-          instructions: defaultInstructions,
-          cwd: "",
-          extensions: [],
-          tools: [],
-        });
+        if (!botDefaults) throw new Error("尚未取得 Runner 的智能体默认配置。");
+        bot = await client.createBot({ ...initializeBotDraft(null, botDefaults), name: "幕僚长" });
         const created = bot;
         setBots((previous) => [...previous, created]);
         setSelectedBotId(bot.id);
@@ -201,7 +205,7 @@ export function useWorkspace(client: RunnerClient) {
 
   function archiveBot(bot: Bot) {
     return runAction(async () => {
-      const result = await client.archiveBot(bot.id);
+      const result = await client.archiveBot(bot.id, bot.configVersion);
       setBots(result.bots);
       if (selectedBotId === bot.id)
         setSelectedBotId(result.bots.find((item) => !item.archived)?.id ?? "");
@@ -217,7 +221,7 @@ export function useWorkspace(client: RunnerClient) {
       setConversations((previous) =>
         previous.map((conversation) =>
           conversation.id === conversationId
-            ? { ...conversation, botRevision: result.botRevision }
+            ? { ...conversation, botConfigVersion: result.botConfigVersion }
             : conversation,
         ),
       );
@@ -243,20 +247,66 @@ export function useWorkspace(client: RunnerClient) {
     });
   }
 
+  function refreshSelection(initial: InitializeResult) {
+    acceptCatalog(initial);
+    setSelectedBotId((previous) =>
+      initial.bots.some((bot) => bot.id === previous && !bot.archived)
+        ? previous
+        : (initial.bots.find((bot) => !bot.archived)?.id ?? ""),
+    );
+    if (!initial.conversations.some((conversation) => conversation.id === conversationId))
+      setConversationId(initial.conversations[0]?.id ?? null);
+  }
+
+  function reloadConfiguration() {
+    setNotice("");
+    return runAction(async () => {
+      const initial = await client.reloadConfiguration();
+      refreshSelection(initial);
+      setNotice(
+        initial.configuration.errors.length
+          ? "配置重载已完成，部分磁盘修改未生效，请查看配置错误。"
+          : "配置已重载。智能体默认配置用于后续执行，已有执行需显式应用。",
+      );
+    });
+  }
+
+  function saveConfiguration(path: string, version: string, content: string) {
+    setNotice("");
+    return runAction(async () => {
+      await client.saveConfiguration(path, version, content);
+      refreshSelection(await client.initialize());
+      setNotice("配置文件已保存并重载。已有执行的配置不会自动改变。");
+    });
+  }
+
+  function stopRunner() {
+    setNotice("");
+    setPollingPaused(true);
+    return runAction(async () => {
+      try {
+        await client.stopRunner();
+        setRunnerStopped(true);
+        setRunnerUnavailable(true);
+        setPollingError("");
+        setNotice("后台 Runner 已停止，未完成工作保留恢复状态。可以随时启动并连接。");
+      } catch (cause) {
+        setPollingPaused(false);
+        throw cause;
+      }
+    });
+  }
+
   function restartRunner() {
     setNotice("");
+    setPollingPaused(true);
     return runAction(async () => {
       try {
         await client.restartRunner();
         const initial = await client.initialize();
-        acceptCatalog(initial);
-        setSelectedBotId((previous) =>
-          initial.bots.some((bot) => bot.id === previous && !bot.archived)
-            ? previous
-            : (initial.bots.find((bot) => !bot.archived)?.id ?? ""),
-        );
-        if (!initial.conversations.some((conversation) => conversation.id === conversationId))
-          setConversationId(initial.conversations[0]?.id ?? null);
+        refreshSelection(initial);
+        setRunnerStopped(false);
+        setPollingPaused(false);
         setNotice("Runner 已重新启动，pi-durable 正在恢复未完成工作。");
       } catch (cause) {
         setRunnerUnavailable(true);
@@ -337,17 +387,19 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   return {
-    catalog: { bots, conversations, capabilities },
+    catalog: { bots, conversations, capabilities, botDefaults, configuration },
     selection: { conversationId, selectedBotId, selectedBot, activeBot, snapshot },
     connection: {
       loading,
       busy,
       runnerUnavailable,
+      runnerStopped,
+      ready: configuration?.ready ?? false,
       providerConfigured,
       runtimeVersion,
       credentialWarning,
     },
-    feedback: { error, notice, dismissNotice: () => setNotice("") },
+    feedback: { error: error || pollingError, notice, dismissNotice: () => setNotice("") },
     conversation: {
       hasLiveTasks,
       executing,
@@ -376,6 +428,10 @@ export function useWorkspace(client: RunnerClient) {
       saveGoal,
       setGoalStatus,
       restartRunner,
+      stopRunner,
+      reloadConfiguration,
+      readConfiguration: client.readConfiguration,
+      saveConfiguration,
       setProviderCredential,
     },
   };
@@ -384,5 +440,9 @@ export function useWorkspace(client: RunnerClient) {
 export type Workspace = ReturnType<typeof useWorkspace>;
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "操作失败，请重试";
+  return error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "操作失败，请重试";
 }

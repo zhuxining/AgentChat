@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,51 +7,62 @@ import {
   type AssistantMessage,
   type ProviderStreams,
 } from "@earendil-works/pi-ai";
-import { createModels, createProvider } from "@earendil-works/pi-ai/models";
-import type { MutableModels } from "@earendil-works/pi-ai/models";
+import { createModels, createProvider, type MutableModels } from "@earendil-works/pi-ai/models";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { createApplicationRunner } from "../src/application.js";
+import { defaultRunnerConfiguration } from "../src/config/schema.js";
+import { openRunner, type Runner } from "../src/harness/open.js";
 
-const temporaryDirectories: string[] = [];
+const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-
-async function createFixture(models?: MutableModels) {
+async function fixture(models?: MutableModels) {
   const dataDir = await mkdtemp(join(tmpdir(), "agentchat-runner-"));
-  temporaryDirectories.push(dataDir);
-  const runner = await createApplicationRunner({ dataDir, models });
-  return { dataDir, runner };
+  directories.push(dataDir);
+  if (models) {
+    const configuration = defaultRunnerConfiguration();
+    const model = models.getModels()[0];
+    if (!model) throw new Error("测试需要一个确定性模型");
+    configuration.botDefaults.model = { provider: model.provider, modelId: model.id };
+    await writeFile(join(dataDir, "runner.json"), JSON.stringify(configuration));
+  }
+  return { dataDir, runner: await openRunner({ dataDir, models }) };
 }
-
-async function createBotAndConversation(
-  runner: Awaited<ReturnType<typeof createApplicationRunner>>,
-  modelId = "deepseek-chat",
-  cwd = process.cwd(),
-  conversationCwd = "",
-) {
-  const bot = (await runner.handle({
-    op: "createBot",
+async function createChat(runner: Runner, modelId = "deepseek-chat", cwd = "") {
+  const bot = await runner.createBot({
     name: "本地助手",
-    modelId,
+    model: { provider: "deepseek", modelId },
     instructions: "用简体中文回答。",
-    cwd,
-    thinkingLevel: "medium",
-    extensions: ["coding-tools"],
-    tools: ["bash", "edit", "read", "write"],
-  })) as { id: string };
-  const conversation = (await runner.handle({
-    op: "createConversation",
-    botId: bot.id,
-    cwd: conversationCwd,
-  })) as { id: number };
+    ...(cwd ? { cwd } : {}),
+  });
+  const conversation = await runner.createConversation({ botId: bot.id, cwd: "", goal: "" });
   return { bot, conversation };
 }
+async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean): Promise<T> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const value = await read();
+    if (matches(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("执行未在限定时间内达到预期状态");
+}
+const active = (runner: Runner, id: number) =>
+  until(
+    () => runner.snapshot(id),
+    (value) => value.activeTasks.length > 0,
+  );
+const reply = (runner: Runner, id: number) =>
+  until(
+    () => runner.snapshot(id),
+    (value) =>
+      value.messages.some(
+        (message) => message.role === "assistant" && message.text === "确定性回复",
+      ),
+  );
 
 function deterministicModels(
   delayMs = 0,
@@ -131,425 +142,305 @@ function deterministicModels(
   return models;
 }
 
-async function waitForActiveTask(
-  runner: Awaited<ReturnType<typeof createApplicationRunner>>,
-  conversationId: number,
-) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const snapshot = (await runner.handle({ op: "snapshot", conversationId })) as {
-      activeTasks: unknown[];
-    };
-    if (snapshot.activeTasks.length > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("pi-durable 未在限定时间内启动 Conversation Task");
-}
-
-async function waitForReply(
-  runner: Awaited<ReturnType<typeof createApplicationRunner>>,
-  conversationId: number,
-) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const snapshot = (await runner.handle({ op: "snapshot", conversationId })) as {
-      messages: { role: string; text: string }[];
-    };
-    if (
-      snapshot.messages.some(
-        (message) => message.role === "assistant" && message.text === "确定性回复",
-      )
-    ) {
-      return snapshot;
+describe("Runner typed operations", () => {
+  it("materializes Bot defaults and assigns separate stable workspaces", async () => {
+    const { dataDir, runner } = await fixture();
+    try {
+      const { bot, conversation } = await createChat(runner);
+      const another = await runner.createBot({ name: "另一个助手" });
+      expect(bot.cwd).toBe(join(await realpath(dataDir), "workspaces", bot.id));
+      expect(another.cwd).not.toBe(bot.cwd);
+      expect((await runner.snapshot(conversation.id)).conversation.agent.cwd).toBe(bot.cwd);
+      const stored = JSON.parse(await readFile(join(dataDir, "bots", bot.id, "bot.json"), "utf8"));
+      expect(stored.agent.tools).toEqual(["bash", "edit", "read", "write"]);
+      expect(stored).not.toHaveProperty("revision");
+      expect(stored).not.toHaveProperty("configVersion");
+    } finally {
+      await runner.close();
     }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("pi-durable 未在限定时间内提交确定性回复");
-}
+  });
 
-describe("Runner application Interface", () => {
-  it("registers both DeepSeek API aliases and rejects unavailable models", async () => {
-    const { runner } = await createFixture();
+  it("resolves supported models and rejects unavailable models before creating a Bot", async () => {
+    const { runner } = await fixture();
     try {
       for (const modelId of ["deepseek-chat", "deepseek-reasoner"]) {
-        const { bot, conversation } = await createBotAndConversation(runner, modelId);
-        const state = (await runner.handle({
-          op: "snapshot",
-          conversationId: conversation.id,
-        })) as {
-          conversation: { botId: string; agent: { model: { provider: string; modelId: string } } };
-        };
-        expect(state.conversation.botId).toBe(bot.id);
-        expect(state.conversation.agent.model).toEqual({ provider: "deepseek", modelId });
+        const { conversation } = await createChat(runner, modelId);
+        expect((await runner.snapshot(conversation.id)).conversation.agent.model).toEqual({
+          provider: "deepseek",
+          modelId,
+        });
       }
-      await expect(createBotAndConversation(runner, "gpt-5-mini")).rejects.toThrow(
-        "模型「deepseek/gpt-5-mini」当前不可用",
-      );
+      await expect(createChat(runner, "missing-model")).rejects.toThrow("当前不可用");
     } finally {
-      await runner.handle({ op: "close" });
+      await runner.close();
     }
   });
 
-  it("persists Bot configuration and Conversation snapshot across Harness reopen", async () => {
-    const { dataDir, runner } = await createFixture();
-    const { bot, conversation } = await createBotAndConversation(runner);
-    await runner.handle({ op: "close" });
-
-    const reopened = await createApplicationRunner({ dataDir });
+  it("keeps effective Agent choices until explicitly applied and restores them after reopen", async () => {
+    const { runner, dataDir } = await fixture();
+    const { bot, conversation } = await createChat(runner);
     try {
-      const initialized = (await reopened.handle({ op: "initialize" })) as {
-        bots: { id: string; instructions: string }[];
-        conversations: { id: number; botId: string }[];
-      };
-      expect(initialized.bots).toContainEqual(
-        expect.objectContaining({ id: bot.id, instructions: "用简体中文回答。" }),
-      );
-      expect(initialized.conversations).toContainEqual(
-        expect.objectContaining({ id: conversation.id, botId: bot.id }),
-      );
-      const snapshot = (await reopened.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: {
-          botName: string;
-          agent: {
-            model: { provider: string; modelId: string } | null;
-            thinkingLevel: string;
-            instructions: string;
-            cwd: string;
-            extensions: string[];
-            tools: string[];
-          };
-        };
-        messages: unknown[];
-      };
-      expect(snapshot.conversation.botName).toBe("本地助手");
-      expect(snapshot.conversation.agent).toEqual({
-        model: { provider: "deepseek", modelId: "deepseek-chat" },
-        thinkingLevel: "medium",
-        instructions: "用简体中文回答。",
-        cwd: process.cwd(),
-        extensions: ["agentchat-work-goal", "coding-tools"],
-        tools: ["bash", "edit", "read", "write"],
-      });
-      expect(snapshot.messages).toEqual([]);
-    } finally {
-      await reopened.handle({ op: "close" });
-    }
-  });
-
-  it("uses the Runner data directory when a Bot has no cwd override", async () => {
-    const { dataDir, runner } = await createFixture();
-    try {
-      const { conversation } = await createBotAndConversation(runner, "deepseek-chat", "");
-      const snapshot = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: { agent: { cwd: string } };
-      };
-      expect(snapshot.conversation.agent.cwd).toBe(dataDir);
-    } finally {
-      await runner.handle({ op: "close" });
-    }
-  });
-
-  it("applies a Conversation cwd override to its Agent snapshot", async () => {
-    const { runner } = await createFixture();
-    try {
-      const { conversation } = await createBotAndConversation(
-        runner,
-        "deepseek-chat",
-        "",
-        "/tmp/agentchat-work",
-      );
-      const snapshot = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: { agent: { cwd: string } };
-      };
-      expect(snapshot.conversation.agent.cwd).toBe("/tmp/agentchat-work");
-    } finally {
-      await runner.handle({ op: "close" });
-    }
-  });
-
-  it("keeps Conversation settings as a snapshot until an idle-only apply", async () => {
-    const { runner } = await createFixture(deterministicModels());
-    const { bot, conversation } = await createBotAndConversation(runner, "test-model");
-    try {
-      await runner.handle({
-        op: "updateBot",
-        botId: bot.id,
-        name: "新版本地助手",
-        modelId: "test-model",
-        instructions: "更新后的指令。",
-        cwd: "/tmp/agentchat-new-default",
-        thinkingLevel: "high",
-        extensions: ["coding-tools"],
-        tools: ["read"],
-      });
-
-      const unchanged = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: {
-          botRevision: number;
-          agent: { instructions: string; cwd: string; thinkingLevel: string };
-        };
-      };
-      expect(unchanged.conversation.botRevision).toBe(1);
-      expect(unchanged.conversation.agent).toEqual(
-        expect.objectContaining({
-          instructions: "用简体中文回答。",
-          cwd: process.cwd(),
-          thinkingLevel: "medium",
-        }),
-      );
-
-      await runner.handle({ op: "applyBotSettings", conversationId: conversation.id });
-      const applied = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: {
-          botName: string;
-          botRevision: number;
-          agent: { instructions: string; cwd: string; thinkingLevel: string; tools: string[] };
-        };
-      };
-      expect(applied.conversation).toEqual(
-        expect.objectContaining({ botName: "新版本地助手", botRevision: 2 }),
-      );
-      expect(applied.conversation.agent).toEqual(
-        expect.objectContaining({
-          instructions: "更新后的指令。",
-          cwd: "/tmp/agentchat-new-default",
-          thinkingLevel: "high",
+      const result = await runner.updateBot(
+        bot.id,
+        {
+          name: "新版助手",
+          instructions: "更新指令",
           tools: ["read"],
-        }),
+          cwd: join(dataDir, "project"),
+        },
+        bot.configVersion,
       );
-    } finally {
-      await runner.handle({ op: "close" });
-    }
-  });
-
-  it("rejects applying Bot changes while a Task is active", async () => {
-    const { runner } = await createFixture(deterministicModels(800));
-    const { bot, conversation } = await createBotAndConversation(runner, "test-model");
-    try {
-      await runner.handle({
-        op: "submit",
-        conversationId: conversation.id,
-        text: "请等待并回答",
-        requestId: "busy-update-1",
-      });
-      await waitForActiveTask(runner, conversation.id);
-      await runner.handle({
-        op: "updateBot",
-        botId: bot.id,
-        name: "更新中的助手",
-        modelId: "test-model",
-        instructions: "新指令",
-        cwd: process.cwd(),
-        thinkingLevel: "medium",
-        extensions: ["coding-tools"],
+      expect((await runner.snapshot(conversation.id)).conversation.agent.instructions).toBe(
+        "用简体中文回答。",
+      );
+      await runner.applyBotSettings(conversation.id);
+      const snapshot = await runner.snapshot(conversation.id);
+      expect(snapshot.conversation.agent).toMatchObject({
+        instructions: "更新指令",
         tools: ["read"],
+        cwd: join(dataDir, "project"),
       });
-      await expect(
-        runner.handle({ op: "applyBotSettings", conversationId: conversation.id }),
-      ).rejects.toThrow("必须等它空闲后才能应用 Bot 设置");
-      await waitForReply(runner, conversation.id);
+      expect(snapshot.conversation.botConfigVersion).toBe(result.bot.configVersion);
     } finally {
-      await runner.handle({ op: "close" });
+      await runner.close();
     }
-  });
-
-  it("archives a Bot without breaking its existing Conversation and tracks explicit goal state", async () => {
-    const { runner } = await createFixture();
-    const { bot, conversation } = await createBotAndConversation(runner);
+    const reopened = await openRunner({ dataDir });
     try {
-      await runner.handle({
-        op: "saveGoal",
-        conversationId: conversation.id,
-        description: "修复并验证本机功能",
-      });
-      await runner.handle({
-        op: "setGoalStatus",
-        conversationId: conversation.id,
-        status: "completed",
-      });
-      await runner.handle({ op: "archiveBot", botId: bot.id });
-
-      const initialized = (await runner.handle({ op: "initialize" })) as {
-        bots: { id: string; archived: boolean }[];
-        conversations: { id: number; botId: string }[];
-      };
-      expect(initialized.bots).toContainEqual(
-        expect.objectContaining({ id: bot.id, archived: true }),
-      );
-      expect(initialized.conversations).toContainEqual(
+      expect((await reopened.initialize()).conversations).toContainEqual(
         expect.objectContaining({ id: conversation.id, botId: bot.id }),
       );
+      expect((await reopened.snapshot(conversation.id)).conversation.agent.instructions).toBe(
+        "更新指令",
+      );
+    } finally {
+      await reopened.close();
+    }
+  });
+
+  it("loads independent Bot edits only on reload and rejects stale UI saves", async () => {
+    const { runner, dataDir } = await fixture();
+    try {
+      const { bot, conversation } = await createChat(runner);
+      const path = join(dataDir, "bots", bot.id, "bot.json");
+      const raw = JSON.parse(await readFile(path, "utf8"));
+      raw.agent.instructions = "从文件加载";
+      await writeFile(path, JSON.stringify(raw));
+      expect((await runner.initialize()).bots[0]?.instructions).toBe("用简体中文回答。");
       await expect(
-        runner.handle({ op: "createConversation", botId: bot.id, cwd: "", goal: "" }),
-      ).rejects.toThrow("Bot 不存在或已归档");
-
-      const snapshot = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: { botId: string };
-        goal: { description: string; status: string; completedAt: number | null };
-      };
-      expect(snapshot.conversation.botId).toBe(bot.id);
-      expect(snapshot.goal).toEqual(
-        expect.objectContaining({
-          description: "修复并验证本机功能",
-          status: "completed",
-          completedAt: expect.any(Number),
-        }),
+        runner.updateBot(bot.id, { name: "过期修改" }, bot.configVersion),
+      ).rejects.toThrow("配置已被修改");
+      const loaded = await runner.reloadConfiguration();
+      expect(loaded.bots[0]?.instructions).toBe("从文件加载");
+      expect((await runner.snapshot(conversation.id)).conversation.agent.instructions).toBe(
+        "用简体中文回答。",
       );
     } finally {
-      await runner.handle({ op: "close" });
+      await runner.close();
     }
   });
 
-  it("withdraws a queued Submission and stops active work through pi-durable", async () => {
-    const { runner } = await createFixture(deterministicModels(10_000, true));
-    const { conversation } = await createBotAndConversation(runner, "test-model");
+  it("blocks a broken or missing Bot config without destroying accepted execution state", async () => {
+    const { runner, dataDir } = await fixture();
     try {
-      await runner.handle({
-        op: "submit",
-        conversationId: conversation.id,
-        text: "当前工作",
-        requestId: "abort-current-1",
-      });
-      await waitForActiveTask(runner, conversation.id);
-      const queued = (await runner.handle({
-        op: "submit",
-        conversationId: conversation.id,
-        text: "排队工作",
-        requestId: "abort-queued-1",
-      })) as { id: number };
-      const beforeAbort = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        submissions: { id: number; status: string }[];
-      };
-      expect(beforeAbort.submissions).toContainEqual(
-        expect.objectContaining({ id: queued.id, status: "queued" }),
+      const { bot, conversation } = await createChat(runner);
+      const path = join(dataDir, "bots", bot.id, "bot.json");
+      await writeFile(path, "{broken");
+      const invalid = await runner.reloadConfiguration();
+      expect(invalid.configuration.errors).not.toHaveLength(0);
+      await expect(runner.createConversation({ botId: bot.id, cwd: "", goal: "" })).rejects.toThrow(
+        "Bot 配置缺失或无效",
       );
-
-      const withdrawn = (await runner.handle({
-        op: "abortSubmission",
-        conversationId: conversation.id,
-        submissionId: queued.id,
-      })) as { status: string };
-      expect(withdrawn.status).toBe("aborted");
-      expect(await runner.handle({ op: "abort", conversationId: conversation.id })).toEqual({
-        stopped: true,
-      });
-
-      const afterAbort = (await runner.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        activeTasks: unknown[];
-        submissions: { id: number; status: string }[];
-      };
-      expect(afterAbort.activeTasks).toEqual([]);
+      await unlink(path);
+      await runner.reloadConfiguration();
+      expect((await runner.snapshot(conversation.id)).conversation.botId).toBe(bot.id);
+      expect((await runner.initialize()).conversations).toHaveLength(1);
     } finally {
-      await runner.handle({ op: "close" });
+      await runner.close();
     }
   });
 
-  it("resumes an unfinished accepted run after Harness close and reopen", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "agentchat-runner-resume-"));
-    temporaryDirectories.push(dataDir);
-    const initial = await createApplicationRunner({
-      dataDir,
-      models: deterministicModels(60_000, true),
-    });
-    const { bot, conversation } = await createBotAndConversation(initial, "test-model");
-    await initial.handle({
-      op: "submit",
+  it("keeps instructionsFile contents in the effective execution snapshot", async () => {
+    const { runner, dataDir } = await fixture();
+    try {
+      const bot = await runner.createBot({ name: "文件指令" });
+      const path = join(dataDir, "bots", bot.id, "bot.json");
+      const raw = JSON.parse(await readFile(path, "utf8"));
+      delete raw.agent.instructions;
+      raw.agent.instructionsFile = "instructions.md";
+      await writeFile(join(dataDir, "bots", bot.id, "instructions.md"), "第一版指令");
+      await writeFile(path, JSON.stringify(raw));
+      await runner.reloadConfiguration();
+      const conversation = await runner.createConversation({ botId: bot.id, cwd: "", goal: "" });
+      await writeFile(join(dataDir, "bots", bot.id, "instructions.md"), "第二版指令");
+      await runner.reloadConfiguration();
+      expect((await runner.snapshot(conversation.id)).conversation.agent.instructions).toBe(
+        "第一版指令",
+      );
+      await runner.applyBotSettings(conversation.id);
+      expect((await runner.snapshot(conversation.id)).conversation.agent.instructions).toBe(
+        "第二版指令",
+      );
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it("does not apply configuration changes while accepted work is active", async () => {
+    const { runner } = await fixture(deterministicModels(400));
+    try {
+      const { bot, conversation } = await createChat(runner, "test-model");
+      await runner.submit({
+        conversationId: conversation.id,
+        text: "等待回复",
+        requestId: "busy-1",
+      });
+      await active(runner, conversation.id);
+      await runner.updateBot(bot.id, { instructions: "新指令" }, bot.configVersion);
+      await expect(runner.applyBotSettings(conversation.id)).rejects.toThrow("必须等它空闲");
+      await reply(runner, conversation.id);
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it("archives without cancelling work or completing the work goal", async () => {
+    const { runner } = await fixture(deterministicModels());
+    try {
+      const { bot, conversation } = await createChat(runner, "test-model");
+      await runner.saveGoal(conversation.id, "完成项目");
+      await runner.archiveBot(bot.id, bot.configVersion);
+      await expect(runner.createConversation({ botId: bot.id, cwd: "", goal: "" })).rejects.toThrow(
+        "已归档",
+      );
+      await runner.submit({
+        conversationId: conversation.id,
+        text: "问候",
+        requestId: "archived-1",
+      });
+      expect((await reply(runner, conversation.id)).goal.status).toBe("open");
+      await runner.setGoalStatus(conversation.id, "completed");
+      expect((await runner.snapshot(conversation.id)).goal.status).toBe("completed");
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it("uses durable admission idempotency, withdraws queued input and aborts active work", async () => {
+    const { runner } = await fixture(deterministicModels(60_000, true));
+    try {
+      const { conversation } = await createChat(runner, "test-model");
+      const input = { conversationId: conversation.id, text: "当前工作", requestId: "current-1" };
+      const first = await runner.submit(input);
+      expect((await runner.submit(input)).id).toBe(first.id);
+      await active(runner, conversation.id);
+      const queued = await runner.submit({
+        conversationId: conversation.id,
+        text: "排队",
+        requestId: "queued-1",
+      });
+      expect((await runner.abortSubmission(conversation.id, queued.id)).status).toBe("aborted");
+      await runner.abort(conversation.id);
+      expect((await runner.snapshot(conversation.id)).activeTasks).toEqual([]);
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it("resumes accepted work after close without resubmitting the input", async () => {
+    const { runner, dataDir } = await fixture(deterministicModels(60_000, true));
+    const { conversation } = await createChat(runner, "test-model");
+    await runner.submit({
       conversationId: conversation.id,
-      text: "请在重启后继续",
-      requestId: "resume-after-close-1",
+      text: "重启后继续",
+      requestId: "resume-1",
     });
-    await waitForActiveTask(initial, conversation.id);
-    await initial.handle({ op: "close" });
-
-    const reopened = await createApplicationRunner({ dataDir, models: deterministicModels() });
+    await active(runner, conversation.id);
+    await runner.close();
+    const reopened = await openRunner({ dataDir, models: deterministicModels() });
     try {
-      const current = (await reopened.handle({
-        op: "snapshot",
-        conversationId: conversation.id,
-      })) as {
-        conversation: { botId: string };
-        messages: { role: string; text: string }[];
-      };
-      expect(current.conversation.botId).toBe(bot.id);
-      const completed = await waitForReply(reopened, conversation.id);
+      const snapshot = await reply(reopened, conversation.id);
       expect(
-        completed.messages.filter(
-          (message) => message.role === "assistant" && message.text === "确定性回复",
+        snapshot.messages.filter(
+          (message) => message.role === "user" && message.text === "重启后继续",
         ),
       ).toHaveLength(1);
+      expect(snapshot.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
     } finally {
-      await reopened.handle({ op: "close" });
+      await reopened.close();
     }
   });
 
-  it("keeps the Provider key out of process and child tool environments", async () => {
-    const priorApiKey = process.env.DEEPSEEK_API_KEY;
-    process.env.DEEPSEEK_API_KEY = "test-secret-that-must-not-reach-tools";
-    const { runner } = await createFixture();
+  it("keeps model credentials out of the tool process environment", async () => {
+    const previous = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-secret";
+    const { runner } = await fixture();
     try {
       expect(process.env.DEEPSEEK_API_KEY).toBeUndefined();
-      const initialized = (await runner.handle({ op: "initialize" })) as {
-        apiKeyConfigured: boolean;
-      };
-      expect(initialized.apiKeyConfigured).toBe(true);
-      expect(await runner.handle({ op: "setProviderCredential", apiKey: null })).toEqual({
-        configured: false,
-      });
-      expect(process.env.DEEPSEEK_API_KEY).toBeUndefined();
+      expect((await runner.initialize()).apiKeyConfigured).toBe(true);
+      expect(runner.setProviderCredential(null)).toEqual({ configured: false });
     } finally {
-      await runner.handle({ op: "close" });
-      if (priorApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
-      else process.env.DEEPSEEK_API_KEY = priorApiKey;
+      await runner.close();
+      if (previous === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = previous;
     }
   });
 
-  it("returns the same Submission for a retried requestId and commits the model reply", async () => {
-    const { runner } = await createFixture(deterministicModels());
-    const { conversation } = await createBotAndConversation(runner, "test-model");
+  it("validates model and capability references before publishing or saving configuration", async () => {
+    const { runner, dataDir } = await fixture();
     try {
-      const request = {
-        op: "submit",
-        conversationId: conversation.id,
-        text: "请打招呼",
-        requestId: "stable-request-1",
-      };
-      const first = (await runner.handle(request)) as { id: number };
-      const retried = (await runner.handle(request)) as { id: number };
-      expect(retried.id).toBe(first.id);
-
-      const snapshot = await waitForReply(runner, conversation.id);
-      expect(snapshot.messages).toContainEqual(
-        expect.objectContaining({ role: "user", text: "请打招呼" }),
+      const { bot } = await createChat(runner);
+      const path = "bots/" + bot.id + "/bot.json";
+      const file = await runner.readConfiguration(path);
+      const raw = JSON.parse(file.content);
+      raw.agent.tools = ["unregistered-tool"];
+      await expect(
+        runner.saveConfiguration(path, file.version, JSON.stringify(raw)),
+      ).rejects.toThrow("模型或能力");
+      expect((await runner.readConfiguration(path)).content).toBe(file.content);
+      raw.agent.model.modelId = "unavailable-model";
+      await writeFile(join(dataDir, path), JSON.stringify(raw));
+      const reloaded = await runner.reloadConfiguration();
+      expect(reloaded.bots[0]?.configVersion).toBe(bot.configVersion);
+      expect(reloaded.configuration.errors).toContainEqual(
+        expect.objectContaining({ botId: bot.id }),
       );
-      expect(snapshot.messages).toContainEqual(
-        expect.objectContaining({ role: "assistant", text: "确定性回复" }),
+      await expect(runner.createConversation({ botId: bot.id, cwd: "", goal: "" })).rejects.toThrow(
+        "配置缺失或无效",
       );
     } finally {
-      await runner.handle({ op: "close" });
+      await runner.close();
+    }
+  });
+
+  it("allows a cold-invalid Runner config to be repaired through the protocol operations", async () => {
+    const { runner, dataDir } = await fixture();
+    await runner.close();
+    await writeFile(join(dataDir, "runner.json"), "{");
+    const diagnostic = await openRunner({ dataDir });
+    try {
+      expect((await diagnostic.initialize()).configuration.ready).toBe(false);
+      const broken = await diagnostic.readConfiguration("runner.json");
+      await diagnostic.saveConfiguration(
+        "runner.json",
+        broken.version,
+        JSON.stringify({
+          schemaVersion: 1,
+          name: "修复后的 Runner",
+          workspace: { root: "workspaces" },
+          providers: { deepseek: { type: "deepseek", credentialRef: "provider/deepseek" } },
+          botDefaults: {
+            model: { provider: "deepseek", modelId: "deepseek-chat" },
+            thinkingLevel: "medium",
+            instructions: "",
+            extensions: ["coding-tools"],
+            tools: ["read"],
+          },
+          harness: {},
+        }),
+      );
+      expect((await diagnostic.initialize()).configuration.ready).toBe(true);
+    } finally {
+      await diagnostic.close();
     }
   });
 });

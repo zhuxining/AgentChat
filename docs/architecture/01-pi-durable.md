@@ -1,113 +1,213 @@
 # pi-durable 应用集成
 
-> **Status**: active（本地桌面切片已实现，并通过当前 macOS arm64 `.app` 启动/退出冒烟；未完成执行的跨进程恢复、真实 Provider 和其他平台仍待验证）。
+> **Status**: active。文件配置与独立后台 Runner 已实现，macOS 本机后台和桌面临时目录冒烟通过；安装包、真实模型和其他平台的验证边界见文末。
 
 ## 装配与执行模型
 
-桌面 Runner 的 TypeScript 入口初始化 models、Registry、ExecutionEnv 和官方 Storage 适配，打开一个长期持有的 Harness。Harness 管理同一 Session 中多个独立配置的 Conversation；Bot 不对应独立进程、Harness 或唯一聊天。移动端和 Relay 不装配执行功能，平台分工见[总览](00-overview.md)。
+原生后台宿主独立于 UI 管理 Node Runner、本机连接和系统凭据。Node 入口加载配置，装配 models、Registry、settings、ExecutionEnv 与官方 SQLite Storage，然后打开一个长期持有的 Harness。所有 Bot 共用 Harness；Bot 不对应独立进程或独立执行数据库。平台分工见[总览](00-overview.md)。
 
-应用直接使用公开导出，不调用私有 TaskScheduler，不手改 Storage 表。普通聊天由内置 GenerationTask、ToolTask 和 CompactionTask 推进；承载进程没有另一套 Agent loop、输入接纳或恢复机制。
+结构对齐 pi-durable 示例 `06-harness`、`07-configuration`、`26-coding-agent`：运行资源是 Harness 装配依赖，Agent 保存模型和能力名称等持久选择。`21-late-join` 与 `31-reload-and-restart` 提示客户端可执行中加入，重启必须重新注册代码再绑定已保存选择；这些示例不代表应用已实现完整网络订阅或远程恢复协议。
 
-Conversation 由不可变 Entry 组成，Agent 选择保存在 pi.agent。submit 接纳输入并返回 Submission，内置 Task 推进 Run。Commit 可原子追加 Entry、修改 Document 和创建 Task；界面读取已提交状态。Turn 是一次模型响应及其工具调用，Run 是从输入到回答的轮次序列。
+普通执行由库内置生成、工具与压缩 Task 推进。应用直接使用公开导出，不自建 Agent loop、接纳、排队、调度或恢复框架，也不读写内部 Storage 表。产品聊天窗口可以包含多个会话，与库 Conversation 的映射由产品适配明确，不默认一一对应。
 
-## 应用动作与公开 API
+## 配置文件
 
-| 应用动作                 | 使用的 pi-durable 能力                              |
-| ------------------------ | --------------------------------------------------- |
-| 创建 Conversation        | createConversation；init 保存应用来源/目标 Document |
-| 发送输入                 | Conversation.submit，传递稳定 requestId             |
-| 查询提交结果             | Submission、Submission.wait、Harness.submission     |
-| 更新会话配置             | configure；应用仅在空闲时开放                       |
-| 撤回已排队输入           | Submission.abort                                    |
-| 停止当前 Conversation    | Conversation.abort，按库定义的作用范围              |
-| 显示回复与工具状态       | viewState/watch，必要时 watchEvents                 |
-| 展示执行任务             | taskGraph/watchTaskGraph                            |
-| Bot 档案、工作目标与归档 | defineDoc 和公开 Commit/tx API                      |
-| 关闭与恢复               | Harness.close、Harness.open、resume                 |
+默认数据根目录为 `~/.agentchat`，宿主允许环境变量 `AGENTCHAT_DATA_DIR` 指定绝对路径。新项目不迁移旧配置、数据库或目录；切换路径是打开另一套数据，不会自动停止旧路径的实例。
 
-输入来源、Conversation 归属和产品参数由应用校验；通过校验后调用库接口，不重新定义 Submission/Run 的状态流转。底层 tx.createSubmission 不用于绕过 submit 的 busy/inbox 规则。跨设备的签名与重试规则见[多端请求](02-multi-device.md#操作信封与接纳)。
+```text
+<data-dir>/
+├─ runner.json
+├─ bots/
+│  └─ <bot-id>/
+│     ├─ bot.json
+│     └─ instructions.md       # 可选
+├─ workspaces/<bot-id>/
+├─ state/runner.sqlite
+├─ logs/host.log
+└─ run/                       # 本机连接与实例锁
+```
 
-## Bot 配置快照
+首次初始化生成默认 Runner 配置；已有无效文件不覆盖，初始化后的文件缺失按错误处理。JSON 文件是期望配置的权威来源；数据库仅保存执行事实和已确定的执行配置，不再持有另一份权威 Bot 默认配置。
 
-Bot 是应用 Document，独立提供 model、thinkingLevel、instructions、extensions、tools 与默认 cwd，并绑定 Runner。桌面当前实现 OpenAI Provider；密钥由 Tauri 原生命令保存到系统凭据库，通过私有 Runner IPC 交给 Node Runner，并保存在 Provider 认证闭包中。Runner 不把密钥放进 shell 工具继承的环境、Bot 快照或 Projection。内置 pi.provider 的 provider session identity 也不是密钥。
+### runner.json
 
-创建 Conversation 时具体化 Bot 默认值，写入 pi.agent，并在 createConversation.init 所属 Commit 中保存来源 Bot ID、配置版本及工作目标等应用字段。允许新 Conversation 覆盖 cwd；运行中不自动跟随 Bot 的目录变化。
+以下示例对应当前 `runner/src/config/schema.ts`：
 
-extensions/tools 使用显式列表表达精确选择；需要继承的字段必须明确语义，避免遗漏字段无意跟随变化后的默认值。instructions 是会话指令，完整 system prompt 由所选 Extension sections 与 instructions 共同生成，不增加隐含配置源。
+```json
+{
+  "schemaVersion": 1,
+  "name": "本机 Runner",
+  "workspace": {
+    "root": "workspaces"
+  },
+  "providers": {
+    "deepseek": {
+      "type": "deepseek",
+      "credentialRef": "provider/deepseek"
+    }
+  },
+  "botDefaults": {
+    "model": {
+      "provider": "deepseek",
+      "modelId": "deepseek-chat"
+    },
+    "thinkingLevel": "medium",
+    "instructions": "",
+    "extensions": ["coding-tools"],
+    "tools": ["bash", "edit", "read", "write"]
+  },
+  "harness": {}
+}
+```
 
-编辑 Bot 只影响新 Conversation；已有 Conversation 在空闲时通过显式操作应用最新配置，运行期间不切换。归档 Bot 阻止创建新 Conversation，保留已有记录、稳定关联和恢复所需配置。权威变更由所属 Runner 完成，其他端发送操作请求，不用整份旧快照覆盖新状态。
+| 字段             | 当前契约                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `schemaVersion`  | 必须为 `1`；未知版本、未知字段或错误类型拒绝加载                                   |
+| `name`           | Runner 展示名称，不充当稳定身份                                                    |
+| `workspace.root` | 自动工作区的根路径；相对路径基于数据根目录，改变后不迁移已有目录                   |
+| `providers`      | Provider 声明；当前只实现键名和类型均为 `deepseek`，引用固定为 `provider/deepseek` |
+| `botDefaults`    | 创建 Bot 的模板；写入具体 Bot 后不再动态继承，当前默认指令为空                     |
+| `harness`        | 可省略或为 `{}`，未覆盖项沿用锁定库版本默认值                                      |
 
-配置快照保存配置值与扩展名称，不冻结 Registry 代码、动态 section 输出、Provider 凭据或全局 settings。重启必须重建 Registry；扩展缺失或版本不兼容需要展示，不能静默替换能力。
+Provider 结构为未来多个已实现类型保留表达空间，**当前不支持任意 Provider ID/别名、任意凭据引用、baseUrl、自定义 Header 或通用 Provider 配置**。模型通过 `provider/modelId` 解析，当前模型适配提供 `deepseek-chat` 与 `deepseek-reasoner`。模型不可解析会显示配置诊断并阻止受影响的新建或显式应用，不静默改用其他模型。
 
-## Document 与执行 Storage
+密钥保存在原生宿主访问的系统凭据库中，引用不是密钥内容。开发时允许宿主读取 `DEEPSEEK_API_KEY`，随后通过私有通信供给 Provider 认证闭包；Node 工具环境剔除模型密钥。凭据更新与轮换是独立操作，不复制进快照；宿主环境变量改变需重启后台才能重新读取。
 
-| 数据                                  | 归属                                  |
-| ------------------------------------- | ------------------------------------- |
-| Conversation、Entry、Submission、Task | Runner 的 Harness/Storage             |
-| Agent、运行进度、inbox、usage         | pi.agent、pi.live、pi.inbox、pi.usage |
-| Bot 默认配置与非敏感 Provider 选择    | 应用 Session Document                 |
-| 来源 Bot、目标、标题与归档            | 应用 Conversation Document            |
-| Provider 密钥                         | Runner 平台安全存储                   |
+### bots/<bot-id>/bot.json
 
-应用用 defineDoc 定义 app.* kind，区别于内置 pi.*；scope、version、history 和 fork 行为按实际业务选择。目标状态由用户确认，Submission done、Run 结束或 Task completed 均不自动表示目标完成。
+Bot ID 取目录名，不在 JSON 中重复保存。下面以 `developer` 为示例 ID：
 
-修改通过公开 Commit/tx 完成，事务回调只使用 tx 读写，不在其中等待网络或重新调用 Session 读取。库维护 Task、Submission 和 Run 结果，应用不建立替代执行日志或 receipt 事实源。Bot 等应用变更的业务版本校验也使用公开事务能力；远程重试保证需按操作验证，不能从 submit 的去重推导所有修改都恰好执行一次。
+```json
+{
+  "schemaVersion": 1,
+  "name": "开发助手",
+  "archived": false,
+  "workspace": {
+    "path": "workspaces/developer"
+  },
+  "agent": {
+    "model": {
+      "provider": "deepseek",
+      "modelId": "deepseek-chat"
+    },
+    "thinkingLevel": "medium",
+    "instructionsFile": "instructions.md",
+    "extensions": ["coding-tools"],
+    "tools": ["bash", "edit", "read", "write"]
+  }
+}
+```
 
-一份执行 Storage 同时只由一个 Harness/进程持有；Rust、手机和 Relay 不读写内部表，不复制检查点执行工作。其他端的 Projection 和网络 Outbox 属于[应用通信数据](02-multi-device.md#projection-与应用存储)。
+这个示例需要同时创建 `bots/developer/instructions.md`。也可以删除 `instructionsFile` 并改为 `"instructions": ""` 或内联指令。两字段必须且只能出现一个，不隐式拼接。
 
-当前 Runner 使用 openNodeSqliteStorage。1.2.0 声明 Node ≥22.19.0，官方适配使用 node:sqlite；根 Bun Workspace 锁定目标平台 Node 22.19.0 二进制，构建时将其与 Runner 入口一起加入 Tauri resources。桌面开发也使用暂存的该 Node runtime，不要求依赖 PATH 中的 Node。MemoryStorage 不用于需要重启保留的生产数据；当前 macOS arm64 `.app` 的资源路径与 Runner 启动已验证，其他平台尚未验证。
+| 字段                               | 当前契约                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `name` / `archived`                | 名称与归档标记；归档禁止新建执行，保留已有工作                                              |
+| `workspace.path`                   | 相对数据根目录解析；绝对路径可指向外部项目；不迁移既有执行                                  |
+| `agent.model`                      | 明确的 `provider` 与 `modelId`；检查 Provider 声明与模型可用性                              |
+| `agent.thinkingLevel`              | schema 接受 `minimal`、`low`、`medium`、`high`、`xhigh`；具体模型的效果以 Provider 能力为准 |
+| `agent.instructions`               | 内联指令，可为空；与独立文件排他                                                            |
+| `agent.instructionsFile`           | 相对 Bot 目录解析，仅接受 Bot 目录内可读取的受限文件；不扫描工作区或上级目录                |
+| `agent.extensions` / `agent.tools` | 精确名称列表，`[]` 表示不启用用户选择项；Tool 所属 Extension 必须启用                       |
 
-SQLite WAL/synchronous=NORMAL 对进程崩溃与断电的保证不同，不承诺零丢失。运行数据保存在平台应用数据目录，不提交数据库或真实密钥。
+创建 Bot 时将模板具体化，默认自动分配稳定工作区，可显式覆盖。新注册能力不自动进入已有 Bot；工作目标所需的应用 Extension 由 Runner 管理，不是用户可重复选择的能力。
+
+同一 Bot 的多个执行默认共享工作区。不复制目录、不自动创建 worktree，也不承诺并发隔离。ExecutionEnv 的 cwd 仅是默认位置，既非路径 scope 也非 OS 沙箱。
+
+### Harness settings
+
+配置采用库的字段名，只暴露已有消费者需要的子集：
+
+| 配置                            | 支持内容                                                           |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `toolExecution`                 | `parallel` / `sequential`，默认沿用库的 `parallel`                 |
+| `followUpMode` / `steeringMode` | `all` / `one-at-a-time`，默认均为 `one-at-a-time`                  |
+| `stream`                        | `timeoutMs`（正整数）、`maxRetries`（非负整数）                    |
+| `retry`                         | `enabled`、`maxRetries`、`baseDelayMs`                             |
+| `compaction`                    | `enabled`、`reserveTokens`、`keepRecentTokens`、`backgroundTokens` |
+
+其他数值字段为非负整数。`stream.maxRetries` 是 Provider/SDK 请求层重试，`retry` 是 Harness 持久生成重试，两层可能叠加。`all` 表示输入选取方式，不表示并行创建多个 Agent；工具并行也不提供文件隔离。进度落盘间隔、内存保留等内部调优项目前不公开。
+
+### 保存、重载与生效
+
+| 操作或配置类型                   | 生效规则                                                                |
+| -------------------------------- | ----------------------------------------------------------------------- |
+| 手工编辑                         | 启动或显式 `reloadConfiguration` 时读取，不监听文件变化                 |
+| UI 保存                          | 携带内容版本，校验后原子替换同一文件，并重载配置                        |
+| `botDefaults`                    | 只影响后续创建的 Bot                                                    |
+| Bot Agent 默认选择与独立指令内容 | 更新有效默认值；后续创建执行使用，已有执行空闲时显式 `applyBotSettings` |
+| `harness`                        | settings 在库下一次读取时使用新值，不为每次执行冻结一份全局策略         |
+| `providers`                      | 标记 `restartRequired`，重启后台后生效；不将重载等同资源重建            |
+| 数据根目录与 Storage             | 进程资源，停止旧实例并启动目标目录，不运行中切换                        |
+
+UI 版本来自文件内容；Bot 配置版本包含所引用指令文件内容。保存前再次检查，发现外部编辑拒绝覆盖并要求刷新。原子替换减少半写入；不遵循协调的外部编辑器仍可能在同一瞬间覆盖，版本保护不是跨任意进程的事务。
+
+无效重载保留当前有效值并返回路径、Bot ID 和错误；磁盘修改不会静默生效。无效 Bot、缺失指令、不可用模型或 Extension/Tool 可通过设置诊断，受影响的创建/应用被拒绝；冷启动无效 Bot 单独禁用，必要 Runner 配置无效时允许诊断连接但不启动执行。修复文件后显式重载。
+
+删除或移动 `bot.json` 标记配置缺失、禁止新建，不删除历史、不自动取消已接纳工作。已保存执行配置仍用于历史和恢复，能否继续还取决于可用模型、能力代码和凭据；文件恢复后可修复关联。归档、取消、删除历史与清理目录分别处理。
+
+## 执行配置与持久化
+
+创建库 Conversation 时使用解析后的 Bot 选择与显式覆盖，写入 `pi.agent`，并在初始 Commit 保存来源 Bot、配置版本和目标等应用状态。指令文件的有效内容进入持久配置，执行不持续读磁盘指令。已有执行在空闲时通过 configure 显式更新，运行或排队期间拒绝切换。
+
+快照保存选择与内容，不冻结 Registry 代码、动态 section 输出、Provider 凭据或全局 settings。重启必须重新注册随包实现；缺失或不兼容能力不能被静默忽略。当前提交入口检查已保存模型和能力是否仍可用。
+
+| 数据                                             | 权威归属                                      |
+| ------------------------------------------------ | --------------------------------------------- |
+| Runner 默认值、Provider 非敏感声明、Bot 默认配置 | JSON 配置文件                                 |
+| Conversation、Entry、Submission、Task            | Harness/Storage                               |
+| Agent、进度、inbox、usage                        | `pi.agent`、`pi.live`、`pi.inbox`、`pi.usage` |
+| 来源 Bot、目标、产品关联                         | 应用 Document                                 |
+| Provider 密钥                                    | 系统凭据库 / 可信宿主凭据入口                 |
+
+Document 是类型化持久状态，不是配置目录中的普通文档。应用状态与扩展状态使用 `defineDoc`，通过公开 Commit/tx 修改；目标由用户确认，Submission done 或 Task completed 不代表目标完成。Bot 默认值不再使用应用 Document 作为另一份事实源。
+
+一份 Storage 只由一个 Harness/进程持有。Rust、UI、手机和 Relay 不打开内部表，也不复制检查点执行工作。生产使用 `openNodeSqliteStorage` 和随包 Node 22.19.0；MemoryStorage 用于测试。SQLite 的崩溃与断电保证不同，不承诺断电零丢失。
 
 ## Submission、排队与控制
 
-本地和远程输入经同一应用入口调用 submit({ type: "input", content, requestId })。同一 Conversation 的稳定 requestId 用于找到已有 Submission；网络超时不代表未接纳。网络确认丢失时复用原 requestId 重试，或凭已知 Submission ID 查询，不能生成新 ID 或重新提交历史 Entry。操作 ID、来源与内容约束详见[多端篇](02-multi-device.md#操作信封与接纳)。
+| 操作             | 公开能力                                  |
+| ---------------- | ----------------------------------------- |
+| 创建执行会话     | `createConversation` 与初始 Commit        |
+| 输入接纳         | `Conversation.submit`，传稳定 `requestId` |
+| 查询输入         | Submission 与 Harness 公开查询            |
+| 更新空闲执行配置 | `configure`                               |
+| 撤回输入         | 公开 Submission 中止接口                  |
+| 取消当前工作     | `Conversation.abort`，按库定义的范围      |
+| 读取状态         | 公开 view/watch 与 taskGraph              |
+| 关闭与恢复       | `Harness.close`、`Harness.open`、`resume` |
 
-busy Conversation 的默认输入为 follow-up；steer 在当前工具轮次后进入正在执行的工作，reject 可拒绝忙时输入。pi.inbox 是已接纳待处理输入的事实来源，网络 Outbox 不复制 follow-up 调度。
+同一库 Conversation 的 requestId 重试查找已有 Submission；响应超时不能推断未接纳，不以新 ID 重发。busy 时 follow-up 与 steer 使用 pi.inbox 的公开规则，不另建执行队列。取消等待只停止等待，不取消执行。
 
-Submission done 表示输入已得到回答，unanswered 包含未回答原因；二者不是 Task outcome 或目标完成状态。取消 Submission.wait 的 Context 只取消等待，不取消执行。
-
-Submission.abort 撤回排队输入；Conversation.abort 停止当前工作并撤回排队输入，排队 write 和 background 所有权边界按库契约处理，不能宣称一次 abort 必然停止所有后台工作。跨网络迟到停止和未送达输入的控制另见[控制边界](02-multi-device.md#传输状态与控制边界)。
-
-不同 Conversation 使用 Harness 内置调度和 settings。1.2.0 没有通用 maxConcurrentRuns，toolExecution 只决定库支持的工具执行模式；全局执行上限不作首发保证，也不通过私有 scheduler 或 submit 外的 semaphore 冒充完整限制。
+Conversation.abort 的后台任务所有权范围按库契约处理，不能宣称必然取消所有后台工作。总执行上限也不由 toolExecution 表达；未获公开能力支持的并发保证不通过私有 scheduler 或额外队列冒充实现。网络投递与迟到控制另见[多端篇](02-multi-device.md#传输状态与控制边界)。
 
 ## 生命周期与恢复
 
-桌面启动依次加载应用身份和通信数据、启动承载进程、初始化 Registry/models/ExecutionEnv、打开 Storage/Harness、重新获取 handles，再调用 resume 恢复已接纳工作并接收请求。submit 或等待也可启动调度，应用不扫描历史后重发已完成输入。
+宿主先检查实例与本机连接，再启动 Node。Node 重建 models、Registry 和环境，读取文件、打开 Storage/Harness，重新取得 handles 并 resume。客户端可在执行中重新连接，不成为工作的所有者。冷启动配置无效时仍可保持通信以诊断修复。
 
-关闭桌面窗口进入退出路径，不维持托盘常驻：停止新应用请求，保存通信层待同步数据，调用 Harness.close 并等待资源收尾，最后结束进程。close 不写 Task outcome，不等同于 abort 全部 Conversation；取消 close 的等待不停止关闭过程。
+退出 UI 不发送 close；显式停止 Runner 才拒绝新请求、调用 close 并等待收尾。close 不等于 abort，不写入所有工作已取消的结果。旧 Harness 关闭完成才能重新打开同一 Storage，旧 handles 不复用。
 
-旧 Harness 关闭完成后才能重开同一 Storage，旧 handle 必须重新获取。Storage 错误由库触发 Harness 失败和关闭，应用等待收尾并展示错误，再决定是否重新打开，不盲目重试所有错误。
+工具意图在 execute 前提交，中断后只有声明 `replay: "safe"` 的工具允许重放；否则按库产生 interrupted 结果。safe 不保证外部副作用恰好一次，工具作者仍需幂等。强制终止、忽略取消或关闭超时的副作用风险需验证，不能把保留恢复状态写成无条件恢复成功。
 
-重启由 Harness 从持久化状态恢复，不从 UI 历史或 Relay Projection 重建 Run。Session 与 Task 检查点不跨 Device 同步执行，首发不自动迁移 Runner 或让手机接管 Harness。
+## Extension、视图与传输
 
-工具意图在 execute 前提交。中断工具只有声明 replay: "safe" 才允许重放，否则产生 interrupted 结果。safe 不提供外部副作用 exactly-once 保证，工具作者仍负责幂等。忽略取消信号的代码可能拖延 close，需验证有界退出；不能宣称强制终止不会影响工具副作用。
+Registry 安装随包 Extension，Bot 按名称选择。Extension 可集中提供 Tool、section、hook、wrapper 与 Task，持久状态放在对应能力旁。普通聊天使用内置 Task；有实际持久业务步骤时才使用 defineTask。TaskRuntime 是库调用接口，无须另启服务。
 
-Runner 退出后 Relay 和其他 Device 仍存在。手机退出或退到后台仅影响自身同步，不取消 Runner 已接纳工作；前台恢复、后台限制和离线投递见[多端篇](02-multi-device.md#离线保留与失败处理)。
+当前编码工具和工作目标按此装配，不纳入计划模式。不动态加载任意代码；Skill/MCP 未来分别接入，不因依赖存在就声称支持。没有额外逐 Bot 审批体系，远程身份授权仍是独立边界。
 
-## Extension、TaskRuntime 与执行环境
+`harness/views.ts` 等读取公开状态并转换展示结果；`communication/` 校验请求并处理私有 stdio。当前 UI 使用快照刷新，不把库的 watch 能力描述为已实现完整客户端流协议。Task Graph 仅包含存活 Task，不是完整历史。未来监听应随连接清理，慢客户端不阻塞 Harness。
 
-薄应用入口用 Registry 安装 Extension；Extension 可提供 Tool、section、hook、wrapper 和 Task。首发普通聊天复用内置 Task，只有实际业务需要持久化步骤时才使用 defineTask；TaskRuntime 是 Harness 在阶段调用时提供的提交、读取、等待、子任务与环境能力，不是应用要启动的服务。
-
-首发无需完整 Chord Host 框架或另一套进程监督者，Registry 在进程内装配即可。Skill/MCP 是后续能力来源，需要适配，不能等同于 Extension 已自动接入。
-
-不新增逐 Bot 工具权限体系，使用启用的能力、输入校验与工具约定；这不表示 pi-durable 自动加载 Pi CLI 配置或审批机制。ExecutionEnv 供工具和 section 使用，NodeExecutionEnv 的 cwd 是默认目录，允许绝对路径与目录外访问，不是路径 scope 或 OS 沙箱。
-
-## 公开状态与展示
-
-viewState/watch 提供 Entry 及 pi.live、pi.inbox、pi.agent、pi.usage 等 Document 的已提交视图。taskGraph/watchTaskGraph 仅展示 Session 中存活 Task 的状态与所有权；终态节点离开图，不能用作完整历史或据此推断目标完成。
-
-watchEvents 是实验性的 Commit 派生事件接口，可用于本地展示，不另存完整原始执行事件日志。subscribeCommits 仅用于非阻塞变更提示，不等待网络、不调用 Session API；订阅与等待要在 UI 卸载及进程退出时清理。
-
-这些通知不构成可回放的 Relay Outbox。跨存储补齐、快照对账及 Projection 的版本规则集中在[多端同步](02-multi-device.md#projection-与应用存储)，应用不得假定存在公开源 Commit 序号或 scanCommits(afterSeq) 接口。
+watch/subscribeCommits 不构成可回放网络日志，不假定存在源 Commit 序号或 `scanCommits(afterSeq)`。断线对账与网络 Outbox 的事务边界见[Projection 与应用存储](02-multi-device.md#projection-与应用存储)。
 
 ## 验证与依据
 
-单机先验证独立 Agent 配置、Document 原子修改、Bot 快照/更新/归档、submit 去重及响应丢失后重查、follow-up/steer、wait 与 abort 区别、公开视图与订阅清理。然后验证真实模型、safe/interrupted 工具、Registry 重建、close/reopen/resume、Storage 失败和桌面进程退出。
+配置与 Harness 测试覆盖重载、版本冲突、指令内容快照、Bot 缺失、模型/能力拒绝和 close/reopen/resume。原生宿主测试覆盖实例排他、连接关联、客户端断开后存活及 stop 仅调用 close。macOS 实际二进制还完成了八客户端请求、重复启动、外部编辑/重载、过期保存拒绝、停止与重开后快照保留；桌面实际读取配置和停止后台，并验证 UI 进程退出不停止后台、重新启动连接已有实例。打包后的 release `.app` 另在临时目录验证了随包 Node runtime 与入口、后台启动、Bot/会话创建、配置读取、UI 退出后后台存活与显式停止。
 
-目前已实现本地 Bot/Conversation 管理、配置快照、工作目标 Document、Extension/Tool 选择、Submission 操作和 Task Graph 投影。Runner 使用 Node 22.19.0 与持久 SQLite；目标平台 Tauri 包含 Node runtime 和 Runner 入口。系统凭据库接入及打包启动路径已落地，当前 macOS arm64 `.app` 的 Runner 启动和正常退出已冒烟验证；实际桌面进程重启时恢复未完成工作、真实 Provider 与 Windows/Linux 仍待验证。总执行上限仍以公开能力为准，不自建调度器。多端可靠性不能由本地链路推导，验收另见[多端篇](02-multi-device.md#待验证与验收)。
+Tauri 打包的 JS/Rust 版本不匹配已修复：`Cargo.toml` 将每个有 JS 对应包的 crate 固定在相同 major.minor，`Cargo.lock` 必须一并保留（Tauri 打包依赖它，且 `tauri-plugin-updater` 的可选 `zip ^4` 已全部 yank，无法重新解析）。
+
+本轮未调用真实 Provider，也未验证有工具副作用的工作跨进程中断恢复。当前 Unix IPC 已实现，Windows IPC 未实现，其他平台未完成打包验收。Device Core、Relay 和移动端可靠性仍是后续范围。
 
 - [官方 README](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md)
 - [官方 spec](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md)
 
-上游 main 可能与安装版本不同，所有具体签名以锁定版本的文档和类型复核。
+上游 main 可能与安装版本不同，具体签名以锁定版本的源码、文档与类型复核。

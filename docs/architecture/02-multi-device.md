@@ -4,13 +4,13 @@
 
 ## 通信分工
 
-每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
+目标是每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。Runner 是独立后台执行宿主，不再定义为某台 Device；当前 Unix 本机 IPC 已实现，Windows 本机 IPC 尚未实现，Device Core 与后台的网络同步接入仍为后续设计。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
 
-| 边界                        | 方式与责任                                        |
-| --------------------------- | ------------------------------------------------- |
-| React ↔ 本机 Device Core    | 类型化 Tauri IPC，提供操作、快照与订阅事件        |
-| 桌面 Device Core ↔ 承载进程 | 薄 API 适配，调用公开能力并读取视图；编码待验证   |
-| Device Core ↔ Relay         | HTTPS 上传/拉取密文，WebSocket 通知变化与在线状态 |
+| 边界                      | 方式与责任                                            |
+| ------------------------- | ----------------------------------------------------- |
+| React ↔ 本机 Device Core  | 类型化 Tauri IPC，提供操作、快照与订阅事件            |
+| Device Core ↔ 后台 Runner | 规划的操作路由；后台宿主独立于 UI，网络接入契约待实现 |
+| Device Core ↔ Relay       | HTTPS 上传/拉取密文，WebSocket 通知变化与在线状态     |
 
 Relay 独立于桌面应用，可部署自有实例；托管地址和运营方式未确定。开发时局域网运行 Relay 不改变生产跨网络拓扑。Relay 保存密文同步记录、定向 Envelope/receipt、传输序号、配对邮箱、设备登记和在线状态；设备按持久化游标拉取，WS 只发变化提示，不承担完整数据传输或通知重放。
 
@@ -32,7 +32,7 @@ Relay 验证设备认证并限制可见范围；Runner 仍独立验证定向请�
 
 Request Envelope 是应用类型，携带协议版本、Identity、来源/目标 Device、稳定操作 ID、操作类型、创建时间和内容。发送方签名覆盖完整操作并绑定接收 Runner，内容加密给接收方；具体编码、有效期和密码学协议待验证。
 
-首发操作为创建 Conversation、提交输入、查询接纳结果、撤回、停止、工作目标更新，以及所属 Bot 的编辑和归档。Provider 凭据管理保留桌面入口，不暴露任意远程文件、Shell、invoke 或 Document 写入接口。
+目标操作为创建库执行对话、提交输入、查询接纳结果、撤回、取消工作、工作目标更新，以及所属 Bot 的编辑和归档。产品聊天窗口可聚合多个会话，不默认与一个库 Conversation 一一对应；请求必须标明真实执行目标。停止后台 Runner 属于本机生命周期操作，不与取消工作混同。Provider 凭据管理保留桌面入口，不暴露任意远程文件、Shell、invoke 或 Document 写入接口。
 
 Runner 校验签名、发送者授权与撤销状态、接收者、Conversation 归属、协议版本、操作范围和重放规则。能解密不代表 payload 的来源字段可信。receipt 必须由原目标 Runner 签发，客户端核验来源和关联 ID。
 
@@ -40,7 +40,7 @@ Envelope/receipt 重投递复用原操作 ID。输入 ID 与来源 Device 一起
 
 Runner 将校验后的输入交给 submit，取得已有或新 Submission，并返回 Submission ID 和真实结果。若接纳成功但确认尚未保存就崩溃，以原 requestId 再次调用找回已有 Submission，补发确认；有已知 Submission ID 时可查询库状态。网络 receipt 不成为另一份执行结算事实源。
 
-submit 的去重不覆盖任意 Bot 修改、configure 或目标更新。这些应用操作通过公开 Document/Commit 做业务版本校验，具体重试契约需验证；无法安全支持时限制操作范围，不增加通用接纳/恢复协调器。
+submit 的去重不覆盖任意 Bot 修改、configure 或目标更新。Bot 默认配置的修改通过 JSON 内容版本与原子保存保护；执行 configure 和目标更新通过公开能力校验，具体网络重试契约需验证；无法安全支持时限制操作范围，不增加通用接纳/恢复协调器。
 
 ## 传输状态与控制边界
 
@@ -70,7 +70,7 @@ pi.live 等可变状态可合并后导出，文本更新节流，Run 结束发�
 
 Device 按页保存 Projection 并推进游标，两者的原子性属于应用存储。客户端不能将本地旧 Projection 写回覆盖 Harness；Bot 与工作目标变更仍发给所属 Runner。
 
-Harness Commit 与 Device Store/Outbox 写入不在同一事务。首选公开 viewState/watch、Document 状态和公开查询生成快照，断线或重启后重新对账，必要时获取历史 Entry。watch 和 subscribeCommits 只是在线通知，不是可回放的执行日志；具体回调约束见[公开状态](01-pi-durable.md#公开状态与展示)。
+Harness Commit 与 Device Store/Outbox 写入不在同一事务。首选公开 viewState/watch、Document 状态和公开查询生成快照，断线或重启后重新对账，必要时获取历史 Entry。watch 和 subscribeCommits 只是在线通知，不是可回放的执行日志；具体回调约束见[公开状态](01-pi-durable.md#extension视图与传输)。
 
 不通过私有接口插入导出记录，不包装全部 Storage Commit 建应用执行日志，不预建持久化导出状态机。若完整状态补齐无法使用公开 API 达成，应查上游能力、专项验证或缩小发布承诺，不能声称 watch 会补齐遗漏的全部 Commit。
 
@@ -78,7 +78,7 @@ Harness Commit 与 Device Store/Outbox 写入不在同一事务。首选公开 v
 
 Device 断网时仍可阅读已下载历史，输入保存在本机 Outbox；未同步内容不可假装可用。Relay 可达而 Runner 离线时，客户端可同步历史并保存待执行请求，等待 Runner 上线接纳。
 
-桌面关闭窗口退出后停止 Runner，Relay 和其他 Device 继续存在；重启恢复已接纳工作并接收待投递请求。手机退出或退到后台仅影响自身同步，不取消已接纳工作；回到前台主动恢复上传、拉取与设备状态，不承诺后台常驻或首发推送。
+桌面窗口关闭或 UI 退出不停止后台 Runner，已接纳工作继续执行。用户显式停止 Runner 时，宿主调用 Harness.close 并收尾，保留恢复状态；Relay 和其他 Device 继续存在，后续启动恢复工作并接收待投递请求。取消工作是独立操作，不由 UI 断连或服务停止隐式触发。手机退出或退到后台仅影响自身同步，不取消已接纳工作；回到前台主动恢复上传、拉取与设备状态，不承诺后台常驻或首发推送。
 
 在线状态只表示同步连接，执行 readiness 单独发布。旧“运行中”Projection 必须附同步时间和来源 Runner 状态，不能当作当前存活证明。
 
@@ -100,7 +100,7 @@ Relay 可见密文大小、记录类型、路由、序号和在线状态，能�
 
 验收覆盖：
 
-- 桌面与手机共享同一 Conversation；Runner 离线、Device 断网及 Relay 重启后恢复同步和投递。
+- 桌面与手机共享产品聊天窗口及关联执行视图；请求准确指向库执行对话。Runner 离线、Device 断网及 Relay 重启后恢复同步和投递。
 - 重复 Envelope、响应丢失与接纳后崩溃均复用 requestId，不重复成为 Submission；Bot 等修改另验版本与重试契约。
 - 公开快照补齐遗漏状态，旧 Projection、归档、分页和游标处理正确；慢消费者不阻塞执行。
 - 未授权设备、错误签名/目标、旧请求重放和撤销被拒绝，密钥轮换边界明确，Projection 不含凭据或执行内部数据。

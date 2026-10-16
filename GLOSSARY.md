@@ -10,8 +10,8 @@ _Avoid_：Bot 进程、设备身份
 **Session（持久化会话集合）**：一份 Storage 中的持久化范围，包含多个 Conversation、Document 与 Task。
 _Avoid_：聊天、账户、跨设备共享数据库
 
-**Conversation（对话）**：由不可变 Entry 组成的交互记录，具有自己的 Agent 配置。它可以承载自由对话或带目标的持续工作。
-_Avoid_：Context Segment、每个 Bot 唯一聊天
+**Conversation（库执行对话）**：pi-durable 中具有独立 Agent 配置的交互记录，由不可变 Entry 组成。
+_Avoid_：产品聊天窗口、每个 Bot 唯一聊天
 
 **Agent（执行配置）**：一个 Conversation 使用的模型、thinking level、Extension、Tool、instructions 和 cwd 等执行选择。
 _Avoid_：Bot、数字分身、进程
@@ -54,10 +54,13 @@ _Avoid_：目录沙箱、工作区权限
 
 ## 应用与多端领域
 
-**Bot（应用概念）**：有稳定身份、名称和默认 Agent 配置的档案，指定创建其 Conversation 的 Runner。归档 Bot 保留既有 Conversation 的关联。
+**产品聊天窗口（产品 Conversation）**：用户与 Bot 连续协作的界面容器，可以汇集多个会话。
+_Avoid_：库 Conversation、Run、Session
+
+**Bot（应用概念）**：有稳定身份、名称、默认 Agent 配置和工作区的助手档案。
 _Avoid_：Agent、Harness、独立进程
 
-**工作目标（应用概念）**：Conversation 所承载工作的目标说明和由用户确认的完成状态。
+**工作目标（应用概念）**：用户与 Bot 协作时的目标说明和由用户确认的完成状态。
 _Avoid_：Task、Run outcome、Submission status
 
 **Identity（应用概念）**：一组已配对 Device 的共同身份与加密信任范围。
@@ -66,8 +69,8 @@ _Avoid_：Session、单台宿主
 **Device（应用概念）**：持有独立设备身份、本地同步数据和发送能力的已配对设备。
 _Avoid_：只读远程窗口、独立 Agent
 
-**Runner（应用概念）**：承载 pi-durable Harness 的 Device。首发使用一个桌面 Runner，手机仅作为 Device，Runner 不代表另一套执行引擎。
-_Avoid_：每个 Bot 一个进程、Relay
+**Runner（后台执行宿主）**：独立于 UI 存活、管理 Bot 配置与工作区并承载 Harness 的后台运行单元。
+_Avoid_：Device、每个 Bot 一个进程、自建执行引擎、Relay
 
 **Device Core（应用模块）**：Device 的身份、本地展示数据、投递与同步能力集合。
 _Avoid_：Harness、Agent runtime
