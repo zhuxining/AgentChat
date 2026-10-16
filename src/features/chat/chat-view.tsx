@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArrowDownIcon,
   ArrowUpIcon,
   ChevronLeftIcon,
   InfoIcon,
@@ -7,37 +8,53 @@ import {
   SquareIcon,
   XIcon,
 } from "lucide-react";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment } from "react";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
+
+// Message ids are only unique inside a library Conversation, so rows are addressed by
+// conversation and message together once several conversations share one transcript.
+function rowId(conversationId: number, messageId: number) {
+  return `${conversationId}:${messageId}`;
+}
 
 export function ChatView({ botId }: { botId: string }) {
   const workspace = useWorkspaceContext();
   const { selection, connection, feedback, messaging, conversation, actions } = workspace;
   const navigate = useNavigate();
-  const messagesRef = useRef<HTMLDivElement>(null);
   const segments = useBotTimeline(selection.botConversations, {
     id: selection.conversationId,
     snapshot: selection.snapshot,
   });
-  const lastMessageId = selection.snapshot?.messages.at(-1)?.id;
-  useEffect(() => {
-    const container = messagesRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
-  }, [selection.conversationId, lastMessageId]);
   const hasConversation = selection.conversationId !== null;
   const executionStatus = conversation.executing
     ? "执行中"
@@ -137,109 +154,159 @@ export function ChatView({ botId }: { botId: string }) {
           </Button>
         </div>
       )}
-      <div
-        ref={messagesRef}
-        aria-live="polite"
-        className="min-h-0 flex-1 overflow-y-auto px-5 py-6"
-      >
-        <div className="mx-auto flex max-w-3xl flex-col gap-5">
-          {segments.map((segment, index) => (
-            <Fragment key={segment.conversation.id}>
-              <p className="text-muted-foreground text-center text-xs">
-                {index === 0
-                  ? formatDate(segment.conversation.createdAt)
-                  : `新会话 · ${formatDate(segment.conversation.createdAt)}`}
-              </p>
-              {segment.snapshot.messages
-                .filter((message) => message.text)
-                .map((message) => (
-                  <Message key={message.id} align={message.role === "user" ? "end" : "start"}>
-                    <MessageContent>
-                      <MessageHeader>
-                        {message.role === "user"
-                          ? "你"
-                          : message.role === "assistant"
-                            ? segment.snapshot.conversation.botName
-                            : message.role === "tool"
-                              ? "工具"
-                              : "系统"}
-                      </MessageHeader>
-                      <Card size="sm" className="w-fit max-w-[90%]">
-                        <CardContent className="text-sm leading-7 break-words whitespace-pre-wrap">
-                          {message.text}
-                          {message.truncated && (
-                            <span className="text-muted-foreground">（内容已截断）</span>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </MessageContent>
-                  </Message>
-                ))}
-            </Fragment>
-          ))}
-          {!hasConversation && (
-            <div className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-              <Avatar size="lg">
-                <AvatarFallback>
-                  <SparklesIcon />
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <h2 className="font-medium">
-                  {selection.activeBot
-                    ? `和${selection.activeBot.name}聊聊`
-                    : "有什么想一起完成的？"}
-                </h2>
-                <p className="text-muted-foreground mt-2 text-sm">使用 DeepSeek，开始一次对话。</p>
-              </div>
-              <Button
-                disabled={connection.busy || connection.runnerUnavailable || !connection.ready}
-                onClick={() => void actions.startConversation(botId)}
-              >
-                开始新对话
-              </Button>
-            </div>
-          )}
-          {hasConversation &&
-            segments.every((segment) => segment.snapshot.messages.length === 0) && (
-              <p className="text-muted-foreground text-center text-sm">
-                输入第一条消息，开始这次对话。
-              </p>
-            )}
-          {messaging.pendingSubmission?.conversationId === selection.conversationId && (
-            <p className="text-muted-foreground text-xs">正在发送消息…</p>
-          )}
-          {messaging.currentAcceptedSubmissionId !== null && (
-            <p className="text-muted-foreground text-xs">
-              消息已发送
-              {messaging.acceptedSubmissionStatus?.status === "queued" ? " · 排队中" : ""}
-            </p>
-          )}
-          {selection.snapshot?.submissions
-            .filter((submission) => submission.status === "queued")
-            .map((submission) => (
-              <div key={submission.id} className="flex items-center justify-between gap-2 text-xs">
-                <span className="text-muted-foreground">消息 #{submission.id} 等待处理</span>
-                {submission.type === "input" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={connection.busy}
-                    onClick={() => void messaging.withdrawSubmission(submission.id)}
-                  >
-                    撤回
-                  </Button>
+      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport className="px-5">
+            <MessageScrollerContent className="mx-auto w-full max-w-3xl py-6">
+              {segments.map((segment, index) => (
+                <Fragment key={segment.conversation.id}>
+                  <MessageScrollerItem messageId={`conversation:${segment.conversation.id}`}>
+                    <Marker variant="separator">
+                      <MarkerContent>
+                        {index === 0
+                          ? formatDate(segment.conversation.createdAt)
+                          : `新会话 · ${formatDate(segment.conversation.createdAt)}`}
+                      </MarkerContent>
+                    </Marker>
+                  </MessageScrollerItem>
+                  {segment.snapshot.messages
+                    .filter((message) => message.text)
+                    .map((message) => (
+                      <MessageScrollerItem
+                        key={rowId(segment.conversation.id, message.id)}
+                        messageId={rowId(segment.conversation.id, message.id)}
+                        scrollAnchor={message.role === "user"}
+                      >
+                        <Message align={message.role === "user" ? "end" : "start"}>
+                          <MessageContent>
+                            <MessageHeader>
+                              {message.role === "user"
+                                ? "你"
+                                : message.role === "assistant"
+                                  ? segment.snapshot.conversation.botName
+                                  : message.role === "tool"
+                                    ? "工具"
+                                    : "系统"}
+                            </MessageHeader>
+                            <Card size="sm" className="w-fit max-w-[90%]">
+                              <CardContent className="text-sm leading-7 break-words whitespace-pre-wrap">
+                                {message.text}
+                                {message.truncated && (
+                                  <span className="text-muted-foreground">（内容已截断）</span>
+                                )}
+                              </CardContent>
+                            </Card>
+                          </MessageContent>
+                        </Message>
+                      </MessageScrollerItem>
+                    ))}
+                </Fragment>
+              ))}
+              {!hasConversation && (
+                <MessageScrollerItem messageId="empty">
+                  <Empty className="min-h-64">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <SparklesIcon />
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {selection.activeBot
+                          ? `和${selection.activeBot.name}聊聊`
+                          : "有什么想一起完成的？"}
+                      </EmptyTitle>
+                      <EmptyDescription>使用 DeepSeek，开始一次对话。</EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button
+                        disabled={
+                          connection.busy || connection.runnerUnavailable || !connection.ready
+                        }
+                        onClick={() => void actions.startConversation(botId)}
+                      >
+                        开始新对话
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                </MessageScrollerItem>
+              )}
+              {hasConversation &&
+                segments.every((segment) => segment.snapshot.messages.length === 0) && (
+                  <MessageScrollerItem messageId="empty-conversation">
+                    <Empty className="min-h-40">
+                      <EmptyHeader>
+                        <EmptyTitle>开始这次对话</EmptyTitle>
+                        <EmptyDescription>输入第一条消息，Bot 会接着往下做。</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </MessageScrollerItem>
                 )}
-              </div>
-            ))}
-          {conversation.hasLiveTasks && (
-            <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Spinner />
-              {conversation.executing ? "正在思考与执行…" : "等待处理…"}
-            </p>
-          )}
-        </div>
-      </div>
+              {messaging.pendingSubmission?.conversationId === selection.conversationId && (
+                <MessageScrollerItem messageId="status:pending">
+                  <Marker role="status">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent>正在发送消息…</MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
+              {messaging.currentAcceptedSubmissionId !== null && (
+                <MessageScrollerItem messageId="status:accepted">
+                  <Marker role="status">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent>
+                      消息已发送
+                      {messaging.acceptedSubmissionStatus?.status === "queued" ? " · 排队中" : ""}
+                    </MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
+              {selection.snapshot?.submissions
+                .filter((submission) => submission.status === "queued")
+                .map((submission) => (
+                  <MessageScrollerItem
+                    key={`submission:${submission.id}`}
+                    messageId={`submission:${submission.id}`}
+                  >
+                    <Marker>
+                      <MarkerContent className="flex-1">
+                        消息 #{submission.id} 等待处理
+                      </MarkerContent>
+                      {submission.type === "input" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={connection.busy}
+                          onClick={() => void messaging.withdrawSubmission(submission.id)}
+                        >
+                          撤回
+                        </Button>
+                      )}
+                    </Marker>
+                  </MessageScrollerItem>
+                ))}
+              {conversation.hasLiveTasks && (
+                <MessageScrollerItem messageId="status:running">
+                  <Marker role="status">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent className="shimmer">
+                      {conversation.executing ? "正在思考与执行…" : "等待处理…"}
+                    </MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton>
+            <ArrowDownIcon />
+            <span className="sr-only">跳到最新消息</span>
+          </MessageScrollerButton>
+        </MessageScroller>
+      </MessageScrollerProvider>
       <form
         className="px-5 pt-2 pb-4"
         onSubmit={(event) => {

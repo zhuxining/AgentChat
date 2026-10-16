@@ -3,6 +3,13 @@ import { PlusIcon, SearchIcon, SettingsIcon, SparklesIcon } from "lucide-react";
 import type { Bot } from "@/app/runner-client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import type { BotSummary } from "@/features/bots/use-bot-summaries";
 
@@ -72,10 +79,23 @@ export function BotList({
           />
         ))}
         {active.length === 0 && (
-          <p className="text-muted-foreground px-3 py-6 text-sm">还没有 Bot，点击右上角 + 创建。</p>
+          <Empty className="min-h-40 p-4">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <SparklesIcon />
+              </EmptyMedia>
+              <EmptyTitle className="text-sm">还没有 Bot</EmptyTitle>
+              <EmptyDescription>点击右上角 + 创建第一个 Bot。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {active.length > 0 && visible.length === 0 && (
-          <p className="text-muted-foreground px-3 py-6 text-sm">没有找到匹配的 Bot。</p>
+          <Empty className="min-h-32 p-4">
+            <EmptyHeader>
+              <EmptyTitle className="text-sm">没有找到匹配的 Bot</EmptyTitle>
+              <EmptyDescription>试试其它关键词。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </nav>
       <footer className="flex items-center justify-between border-t p-3">

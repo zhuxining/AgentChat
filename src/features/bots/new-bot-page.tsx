@@ -27,7 +27,6 @@ export function NewBotPage() {
         <div className="mx-auto max-w-xl">
           {catalog.botDefaults ? (
             <BotConfigForm
-              bot={null}
               capabilities={catalog.capabilities}
               defaults={catalog.botDefaults}
               busy={connection.busy}

@@ -1,4 +1,4 @@
-import { Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, useMatchRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { ChevronLeftIcon, CpuIcon, InfoIcon, KeyRoundIcon, PaletteIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -13,8 +13,11 @@ export const settingsSections = [
   { id: "about", label: "关于", icon: InfoIcon },
 ] as const;
 
+// Settings is a standalone view: it replaces the workspace instead of sitting beside the
+// Bot list, and the navigation back to the workspace lives at the bottom of its own rail.
 export function SettingsLayout() {
   const navigate = useNavigate();
+  const router = useRouter();
   const matchRoute = useMatchRoute();
   const sectionMatch = matchRoute({ to: "/settings/$section", fuzzy: true });
   const activeSection =
@@ -23,63 +26,83 @@ export function SettingsLayout() {
       : null;
   const active = settingsSections.find((item) => item.id === activeSection);
   const { feedback } = useWorkspaceContext();
+
+  function leaveSettings() {
+    if (router.history.canGoBack()) router.history.back();
+    else void navigate({ to: "/" });
+  }
+
   return (
-    <section aria-label="设置" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-        <Button
-          aria-label="返回"
-          variant="ghost"
-          size="icon-sm"
-          className="md:hidden"
-          onClick={() => void navigate(active ? { to: "/settings" } : { to: "/" })}
-        >
-          <ChevronLeftIcon />
-        </Button>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-tauri-drag-region>
-          {active ? active.label : "设置"}
-        </h1>
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="设置分类"
-          className={cn(
-            "min-h-0 flex-1 overflow-y-auto p-3 md:block md:w-56 md:shrink-0 md:flex-none md:border-r",
-            active && "hidden",
-          )}
-        >
-          <ul className="space-y-1">
-            {settingsSections.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={cn(
-                    "hover:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
-                    active?.id === item.id && "bg-accent",
-                  )}
-                  onClick={() =>
-                    void navigate({ to: "/settings/$section", params: { section: item.id } })
-                  }
-                >
-                  <item.icon className="size-4" />
-                  <span className="flex-1 truncate">{item.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+    <section aria-label="设置" className="flex h-full min-h-0 min-w-0 flex-1">
+      <aside
+        aria-label="设置导航"
+        className={cn(
+          "bg-sidebar flex min-h-0 w-full shrink-0 flex-col border-r md:w-60",
+          active && "hidden md:flex",
+        )}
+      >
+        <header className="flex h-16 shrink-0 items-center px-4">
+          <span className="font-semibold" data-tauri-drag-region>
+            设置
+          </span>
+        </header>
+        <nav aria-label="设置分类" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
+          {settingsSections.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={cn(
+                "hover:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
+                active?.id === item.id && "bg-accent",
+              )}
+              onClick={() =>
+                void navigate({ to: "/settings/$section", params: { section: item.id } })
+              }
+            >
+              <item.icon className="size-4" />
+              <span className="flex-1 truncate">{item.label}</span>
+            </button>
+          ))}
         </nav>
-        <div
-          className={cn(
-            "min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-6 md:block",
-            !active && "hidden",
-          )}
-        >
-          <div className="mx-auto max-w-3xl">
+        <footer className="shrink-0 border-t p-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2"
+            onClick={leaveSettings}
+          >
+            <ChevronLeftIcon />
+            返回
+          </Button>
+        </footer>
+      </aside>
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !active && "hidden md:flex")}>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <Button
+            aria-label="返回设置分类"
+            variant="ghost"
+            size="icon-sm"
+            className="md:hidden"
+            onClick={() => void navigate({ to: "/settings" })}
+          >
+            <ChevronLeftIcon />
+          </Button>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-tauri-drag-region>
+            {active ? active.label : "设置"}
+          </h1>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
+          <div className="mx-auto max-w-2xl space-y-6">
             {feedback.notice && (
-              <p role="status" className="text-muted-foreground mb-3 text-xs">
+              <p role="status" className="text-muted-foreground text-xs">
                 {feedback.notice}
               </p>
             )}
-            <Outlet />
+            {active ? (
+              <Outlet />
+            ) : (
+              <p className="text-muted-foreground text-sm">从左侧选择一个分类查看设置。</p>
+            )}
           </div>
         </div>
       </div>
@@ -89,9 +112,9 @@ export function SettingsLayout() {
 
 export function SettingsSectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section aria-label={title} className="space-y-3">
+    <section aria-label={title} className="space-y-2">
       <h2 className="text-sm font-medium">{title}</h2>
-      {children}
+      <div className="bg-card space-y-3 rounded-xl border p-4">{children}</div>
     </section>
   );
 }

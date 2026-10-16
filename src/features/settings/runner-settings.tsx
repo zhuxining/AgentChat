@@ -1,7 +1,6 @@
 import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { InfoRow } from "@/components/ui/inspector-section";
-import { Separator } from "@/components/ui/separator";
 import { ConfigurationEditor } from "@/features/settings/configuration-editor";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
 
@@ -99,13 +98,12 @@ export function RunnerSettings() {
         </SettingsSectionCard>
       )}
       {configuration && (
-        <>
-          <Separator />
+        <SettingsSectionCard title="配置文件">
           <ConfigurationEditor
             files={configuration.files}
             disabled={connection.busy || connection.runnerUnavailable}
           />
-        </>
+        </SettingsSectionCard>
       )}
       <p className="text-muted-foreground text-xs">Node {connection.runtimeVersion || "—"}</p>
     </div>

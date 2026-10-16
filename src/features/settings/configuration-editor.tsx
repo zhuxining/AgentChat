@@ -52,8 +52,7 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
   }
 
   return (
-    <section aria-label="配置文件编辑" className="space-y-3">
-      <h3 className="text-sm font-medium">配置文件</h3>
+    <div className="space-y-3">
       <label className="block space-y-2 text-sm">
         可编辑文件
         <select
@@ -113,7 +112,7 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
           {error}
         </p>
       )}
-    </section>
+    </div>
   );
 }
 

@@ -8,14 +8,21 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
+import { SparklesIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { useBotSearch } from "@/app/bot-search-provider";
 import { useWorkspaceContext } from "@/app/workspace-provider";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { BotDetailsPage } from "@/features/bots/bot-details-page";
 import { BotDetailsPane } from "@/features/bots/bot-details-pane";
 import { BotList } from "@/features/bots/bot-list";
-import { EditBotPage } from "@/features/bots/edit-bot-page";
 import { NewBotPage } from "@/features/bots/new-bot-page";
 import { useBotSummaries } from "@/features/bots/use-bot-summaries";
 import { ChatView } from "@/features/chat/chat-view";
@@ -36,6 +43,7 @@ function WorkspaceShell() {
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
   const indexMatch = matchRoute({ to: "/" });
+  const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
   const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
     conversationId: workspace.selection.conversationId,
     latestMessage:
@@ -55,7 +63,11 @@ function WorkspaceShell() {
         aria-label="Bot 列表"
         className={cn(
           "bg-sidebar min-h-0 shrink-0 flex-col border-r",
-          indexMatch ? "flex w-full md:w-64 xl:w-72" : "hidden md:flex md:w-64 xl:w-72",
+          settingsMatch
+            ? "hidden"
+            : indexMatch
+              ? "flex w-full md:w-64 xl:w-72"
+              : "hidden md:flex md:w-64 xl:w-72",
         )}
       >
         <BotList
@@ -105,12 +117,6 @@ function BotDetailsRoute() {
   return <BotDetailsPage botId={botId} />;
 }
 
-function EditBotRoute() {
-  const { botId } = useParams({ from: "/bots/$botId/edit" });
-  useRouteBot(botId);
-  return <EditBotPage botId={botId} />;
-}
-
 function SettingsSectionPage() {
   const { section } = useParams({ from: "/settings/$section" });
   if (section === "provider") return <ProviderSettings />;
@@ -121,14 +127,18 @@ function SettingsSectionPage() {
 
 function BotsIndexPage() {
   return (
-    <section
-      aria-label="选择 Bot"
-      className="hidden min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center md:flex"
-    >
-      <h2 className="text-lg font-medium">选择一个 Bot 开始聊天</h2>
-      <p className="text-muted-foreground max-w-md text-sm">
-        每个 Bot 有独立的配置与连续对话。用列表右上角的 + 创建后即可开始工作。
-      </p>
+    <section aria-label="选择 Bot" className="hidden min-h-0 min-w-0 flex-1 md:flex">
+      <Empty className="min-h-64">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <SparklesIcon />
+          </EmptyMedia>
+          <EmptyTitle>选择一个 Bot 开始聊天</EmptyTitle>
+          <EmptyDescription>
+            每个 Bot 有独立的配置与连续对话。用列表右上角的 + 创建后即可开始工作。
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     </section>
   );
 }
@@ -157,12 +167,6 @@ const botDetailsRoute = createRoute({
   component: BotDetailsRoute,
 });
 
-const botEditRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/bots/$botId/edit",
-  component: EditBotRoute,
-});
-
 const settingsIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -180,7 +184,6 @@ const routeTree = rootRoute.addChildren([
   newBotRoute,
   chatRoute,
   botDetailsRoute,
-  botEditRoute,
   settingsIndexRoute.addChildren([settingsSectionRoute]),
 ]);
 

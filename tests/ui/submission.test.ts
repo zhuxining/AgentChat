@@ -108,6 +108,7 @@ const initialState: InitializeResult = {
     extensions: ["coding-tools"],
     tools: [{ name: "read", extension: "coding-tools" }],
   },
+  providers: [{ name: "deepseek", models: ["deepseek-chat", "deepseek-reasoner"] }],
   apiKeyConfigured: false,
   runtimeVersion: "v22.19.0",
 };
@@ -200,7 +201,7 @@ it("filters Bots and keeps the query while leaving and returning to the list", a
   renderApp();
   const search = await screen.findByRole("textbox", { name: "搜索 Bot" });
   fireEvent.change(search, { target: { value: "不存在" } });
-  expect(screen.getByText("没有找到匹配的 Bot。")).toBeTruthy();
+  expect(screen.getByText("没有找到匹配的 Bot")).toBeTruthy();
   fireEvent.change(search, { target: { value: "写作" } });
   const nav = screen.getByRole("navigation", { name: "Bot 列表" });
   expect(within(nav).getByText("写作助手")).toBeTruthy();
@@ -351,21 +352,18 @@ it("keeps tool selection consistent while editing and applies settings only on r
   renderApp();
   await openBot();
   const details = await openDetails();
-  fireEvent.click(within(details).getByRole("button", { name: "编辑配置" }));
-  const editor = within(await screen.findByRole("region", { name: "编辑 Bot" }));
+  fireEvent.click(within(details).getByRole("button", { name: "配置能力" }));
+  const editor = within(await screen.findByRole("dialog", { name: "配置能力" }));
   fireEvent.click(editor.getByRole("checkbox", { name: "coding-tools" }));
   expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).checked).toBe(false);
   expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).disabled).toBe(true);
-  fireEvent.change(editor.getByRole("textbox", { name: "模型 ID" }), {
-    target: { value: "deepseek-reasoner" },
-  });
-  fireEvent.click(editor.getByRole("button", { name: "保存 Bot" }));
+  fireEvent.click(editor.getByRole("button", { name: "保存" }));
   await waitFor(() =>
     expect(runnerClient.updateBot).toHaveBeenCalledWith(
       "bot-1",
       expect.objectContaining({
         provider: "deepseek",
-        modelId: "deepseek-reasoner",
+        modelId: "deepseek-chat",
         extensions: [],
         tools: [],
       }),
@@ -402,8 +400,6 @@ it("clears the credential draft after saving and when leaving settings", async (
     target: { value: "unsaved-test-value" },
   });
   fireEvent.click(screen.getByRole("button", { name: "返回" }));
-  await waitFor(() => expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy());
-  fireEvent.click(screen.getByRole("button", { name: "返回" }));
   await waitFor(() => expect(screen.queryByRole("region", { name: "设置" })).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
   const reopened = await screen.findByRole("region", { name: "设置" });
@@ -427,20 +423,39 @@ it("preserves an unsaved work goal while moving between chat and details", async
   );
 });
 
-it("starts a fresh editor draft when the same Bot is reopened", async () => {
+it("starts a fresh dialog draft when the same field is reopened", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
   renderApp();
   await openBot();
   const details = await openDetails();
-  fireEvent.click(within(details).getByRole("button", { name: "编辑配置" }));
-  const editor = within(await screen.findByRole("region", { name: "编辑 Bot" }));
-  fireEvent.change(editor.getByLabelText("Bot 名称"), { target: { value: "未保存的名称" } });
-  fireEvent.click(editor.getByRole("button", { name: "取消" }));
-  await screen.findByRole("region", { name: "Bot 详情" });
-  fireEvent.click(screen.getByRole("button", { name: "编辑配置" }));
-  const reopened = within(await screen.findByRole("region", { name: "编辑 Bot" }));
-  expect((reopened.getByLabelText("Bot 名称") as HTMLInputElement).value).toBe("测试助手");
+  fireEvent.click(within(details).getByRole("button", { name: "编辑指令" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "编辑指令" }));
+  fireEvent.change(dialog.getByRole("textbox", { name: "指令" }), {
+    target: { value: "未保存的指令" },
+  });
+  fireEvent.click(dialog.getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑指令" })).toBeNull());
+  fireEvent.click(within(details).getByRole("button", { name: "编辑指令" }));
+  const reopened = within(await screen.findByRole("dialog", { name: "编辑指令" }));
+  expect((reopened.getByRole("textbox", { name: "指令" }) as HTMLTextAreaElement).value).toBe(
+    "用简体中文回答。",
+  );
+});
+
+it("opens settings as a standalone view and returns to the previous chat", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  renderApp();
+  await openBot();
+  expect(await screen.findByRole("textbox", { name: "发送消息" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
+  const settings = await screen.findByRole("region", { name: "设置" });
+  // The rail owns navigation back to the workspace instead of the Bot list staying visible.
+  expect(within(settings).getByRole("navigation", { name: "设置分类" })).toBeTruthy();
+  fireEvent.click(within(settings).getByRole("button", { name: "返回" }));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "设置" })).toBeNull());
+  expect(await screen.findByRole("textbox", { name: "发送消息" })).toBeTruthy();
 });
 
 it("stops background polling with the Runner and reconnects without closing the UI", async () => {
@@ -536,20 +551,20 @@ it("preserves a raw config draft on conflict and saves with the freshly read ver
   expect(await within(settings).findByText(/内容版本：disk-v3/)).toBeTruthy();
 });
 
-it("archives using the Bot version captured by the editor", async () => {
+it("archives using the Bot version captured by the detail view", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
   vi.mocked(runnerClient.archiveBot).mockRejectedValue(new Error("Bot 配置已变更，请重新读取"));
   renderApp();
   await openBot();
   const details = await openDetails();
-  fireEvent.click(within(details).getByRole("button", { name: "编辑配置" }));
-  const editor = within(await screen.findByRole("region", { name: "编辑 Bot" }));
-  fireEvent.click(editor.getByRole("button", { name: "归档 Bot" }));
+  fireEvent.click(within(details).getByRole("button", { name: "归档 Bot…" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "归档 Bot" }));
+  fireEvent.click(dialog.getByRole("button", { name: "归档" }));
   await waitFor(() =>
     expect(runnerClient.archiveBot).toHaveBeenCalledWith("bot-1", "bot-config-v1"),
   );
-  expect(await editor.findByText("Bot 配置已变更，请重新读取")).toBeTruthy();
+  expect(await screen.findByText("Bot 配置已变更，请重新读取")).toBeTruthy();
 });
 
 it("renders every conversation of a Bot as one continuous timeline", async () => {
@@ -576,6 +591,16 @@ it("renders every conversation of a Bot as one continuous timeline", async () =>
   expect(await chat.findByText("上一段会话的消息")).toBeTruthy();
   expect(chat.getByText("这一段会话的回复")).toBeTruthy();
   expect(chat.getByText(/新会话/)).toBeTruthy();
+});
+
+it("renders the transcript as a message scroller log with a jump control", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  renderApp();
+  await openBot();
+  const chat = within(await screen.findByRole("region", { name: "聊天内容" }));
+  expect(chat.getByRole("log")).toBeTruthy();
+  expect(chat.getByRole("button", { name: "跳到最新消息" })).toBeTruthy();
 });
 
 it("keeps unsent input per Bot when switching Bots", async () => {
