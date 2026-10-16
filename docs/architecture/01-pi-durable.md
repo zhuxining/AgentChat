@@ -1,6 +1,6 @@
 # pi-durable 应用集成
 
-> **Status**: active（设计，尚未实现）。依据 @earendil-works/pi-durable 1.2.0 的公开文档与类型。
+> **Status**: active（本地桌面切片已实现，并通过当前 macOS arm64 `.app` 启动/退出冒烟；未完成执行的跨进程恢复、真实 Provider 和其他平台仍待验证）。
 
 ## 装配与执行模型
 
@@ -29,7 +29,7 @@ Conversation 由不可变 Entry 组成，Agent 选择保存在 pi.agent。submit
 
 ## Bot 配置快照
 
-Bot 是应用 Document，独立提供 model、thinkingLevel、instructions、extensions、tools 与默认 cwd，并绑定 Runner。Provider 配置集中管理，Bot 保存非敏感引用；Provider 密钥留在 Runner 平台安全存储，不进入快照或同步到手机。内置 pi.provider 的 provider session identity 也不是密钥。
+Bot 是应用 Document，独立提供 model、thinkingLevel、instructions、extensions、tools 与默认 cwd，并绑定 Runner。桌面当前实现 OpenAI Provider；密钥由 Tauri 原生命令保存到系统凭据库，通过私有 Runner IPC 交给 Node Runner，并保存在 Provider 认证闭包中。Runner 不把密钥放进 shell 工具继承的环境、Bot 快照或 Projection。内置 pi.provider 的 provider session identity 也不是密钥。
 
 创建 Conversation 时具体化 Bot 默认值，写入 pi.agent，并在 createConversation.init 所属 Commit 中保存来源 Bot ID、配置版本及工作目标等应用字段。允许新 Conversation 覆盖 cwd；运行中不自动跟随 Bot 的目录变化。
 
@@ -55,7 +55,7 @@ extensions/tools 使用显式列表表达精确选择；需要继承的字段必
 
 一份执行 Storage 同时只由一个 Harness/进程持有；Rust、手机和 Relay 不读写内部表，不复制检查点执行工作。其他端的 Projection 和网络 Outbox 属于[应用通信数据](02-multi-device.md#projection-与应用存储)。
 
-优先验证 openNodeSqliteStorage。1.2.0 声明 Node ≥22.19.0，官方适配使用 node:sqlite；仓库用 Bun 管理依赖不强制承载进程也使用 Bun。该版本没有专用 storage/sqlite/bun 入口，portable 适配只在官方支持或完成契约验证后采用，不预建自定义后端。MemoryStorage 不用于需要重启保留的生产数据。
+当前 Runner 使用 openNodeSqliteStorage。1.2.0 声明 Node ≥22.19.0，官方适配使用 node:sqlite；根 Bun Workspace 锁定目标平台 Node 22.19.0 二进制，构建时将其与 Runner 入口一起加入 Tauri resources。桌面开发也使用暂存的该 Node runtime，不要求依赖 PATH 中的 Node。MemoryStorage 不用于需要重启保留的生产数据；当前 macOS arm64 `.app` 的资源路径与 Runner 启动已验证，其他平台尚未验证。
 
 SQLite WAL/synchronous=NORMAL 对进程崩溃与断电的保证不同，不承诺零丢失。运行数据保存在平台应用数据目录，不提交数据库或真实密钥。
 
@@ -105,7 +105,7 @@ watchEvents 是实验性的 Commit 派生事件接口，可用于本地展示，
 
 单机先验证独立 Agent 配置、Document 原子修改、Bot 快照/更新/归档、submit 去重及响应丢失后重查、follow-up/steer、wait 与 abort 区别、公开视图与订阅清理。然后验证真实模型、safe/interrupted 工具、Registry 重建、close/reopen/resume、Storage 失败和桌面进程退出。
 
-Node 分发版本、Tauri 打包和退出策略仍待目标平台验证；总执行上限先查公开能力或上游支持，不自建调度器。研究中已有的无模型存储冒烟仅验证部分配置与存储生命周期，详见[研究记录](../research/pi-durable-runtime.md)。多端可靠性不能由该结果推导，验收另见[多端篇](02-multi-device.md#待验证与验收)。
+目前已实现本地 Bot/Conversation 管理、配置快照、工作目标 Document、Extension/Tool 选择、Submission 操作和 Task Graph 投影。Runner 使用 Node 22.19.0 与持久 SQLite；目标平台 Tauri 包含 Node runtime 和 Runner 入口。系统凭据库接入及打包启动路径已落地，当前 macOS arm64 `.app` 的 Runner 启动和正常退出已冒烟验证；实际桌面进程重启时恢复未完成工作、真实 Provider 与 Windows/Linux 仍待验证。总执行上限仍以公开能力为准，不自建调度器。多端可靠性不能由本地链路推导，验收另见[多端篇](02-multi-device.md#待验证与验收)。
 
 - [官方 README](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md)
 - [官方 spec](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md)

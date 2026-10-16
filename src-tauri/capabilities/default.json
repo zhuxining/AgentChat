@@ -14,9 +14,7 @@
     "notification:default",
     "os:default",
     "process:default",
-    "stronghold:default",
     "sql:default",
-    "shell:default",
     "websocket:default"
   ]
 }
