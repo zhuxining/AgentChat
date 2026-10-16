@@ -44,10 +44,6 @@ export function useWorkspace(client: RunnerClient) {
   // Unsend drafts stay per Bot so switching views never discards what someone typed.
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
-  const [acceptedSubmission, setAcceptedSubmission] = useState<{
-    conversationId: number;
-    id: number;
-  } | null>(null);
   const [goalDraftState, setGoalDraftState] = useState<{
     conversationId: number | null;
     updatedAt: number | null;
@@ -137,11 +133,6 @@ export function useWorkspace(client: RunnerClient) {
   const executing = snapshot?.activeTasks.some((task) => task.status === "running") ?? false;
   const hasUpdatedBotSettings = Boolean(
     snapshot && linkedBot && linkedBot.configVersion !== snapshot.conversation.botConfigVersion,
-  );
-  const currentAcceptedSubmissionId =
-    acceptedSubmission?.conversationId === conversationId ? acceptedSubmission.id : null;
-  const acceptedSubmissionStatus = snapshot?.submissions.find(
-    (submission) => submission.id === currentAcceptedSubmissionId,
   );
   const goalUpdatedAt = snapshot?.goal.updatedAt ?? null;
   const goalDraft =
@@ -338,13 +329,11 @@ export function useWorkspace(client: RunnerClient) {
     const attempt = pendingSubmission ?? { conversationId, text, requestId: crypto.randomUUID() };
     setPendingSubmission(attempt);
     return runAction(async () => {
-      let accepted: { id: number };
       try {
-        accepted = await client.submit(attempt.conversationId, attempt.text, attempt.requestId);
+        await client.submit(attempt.conversationId, attempt.text, attempt.requestId);
       } catch (cause) {
         throw new Error(`${errorMessage(cause)}。接纳结果尚未确认，重试会复用同一 requestId。`);
       }
-      setAcceptedSubmission({ conversationId, id: accepted.id });
       setPendingSubmission(null);
       setInput("");
       try {
@@ -415,8 +404,6 @@ export function useWorkspace(client: RunnerClient) {
       input,
       setInput,
       pendingSubmission,
-      currentAcceptedSubmissionId,
-      acceptedSubmissionStatus,
       submitMessage,
       abort,
       withdrawSubmission,

@@ -166,7 +166,10 @@ export function ChatView({ botId }: { botId: string }) {
       <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport className="px-5">
-            <MessageScrollerContent className="mx-auto w-full max-w-3xl py-6">
+            <MessageScrollerContent
+              aria-busy={conversation.hasLiveTasks}
+              className="mx-auto w-full max-w-3xl py-6"
+            >
               {segments.map((segment, index) => (
                 <Fragment key={segment.conversation.id}>
                   <MessageScrollerItem messageId={`conversation:${segment.conversation.id}`}>
@@ -198,36 +201,33 @@ export function ChatView({ botId }: { botId: string }) {
                       >
                         <Message align={message.role === "user" ? "end" : "start"}>
                           <MessageContent>
-                            <Bubble
-                              align={message.role === "user" ? "end" : "start"}
-                              variant={message.role === "user" ? "default" : "muted"}
-                            >
-                              <BubbleContent>
-                                {message.role === "assistant" ? (
-                                  <Streamdown
-                                    mode={
-                                      rowId(segment.conversation.id, message.id) === latestRowId &&
-                                      conversation.hasLiveTasks
-                                        ? "streaming"
-                                        : "static"
-                                    }
-                                    isAnimating={
-                                      rowId(segment.conversation.id, message.id) === latestRowId &&
-                                      conversation.hasLiveTasks
-                                    }
-                                    animated={false}
-                                    plugins={markdownPlugins}
-                                  >
-                                    {message.text}
-                                  </Streamdown>
-                                ) : (
-                                  <span className="whitespace-pre-wrap">{message.text}</span>
-                                )}
-                                {message.truncated && (
-                                  <span className="text-muted-foreground">（内容已截断）</span>
-                                )}
-                              </BubbleContent>
-                            </Bubble>
+                            {message.role === "user" ? (
+                              <Bubble align="end" variant="muted">
+                                <BubbleContent className="whitespace-pre-wrap">
+                                  {message.text}
+                                </BubbleContent>
+                              </Bubble>
+                            ) : (
+                              <Streamdown
+                                mode={
+                                  rowId(segment.conversation.id, message.id) === latestRowId &&
+                                  conversation.hasLiveTasks
+                                    ? "streaming"
+                                    : "static"
+                                }
+                                isAnimating={
+                                  rowId(segment.conversation.id, message.id) === latestRowId &&
+                                  conversation.hasLiveTasks
+                                }
+                                animated={false}
+                                plugins={markdownPlugins}
+                              >
+                                {message.text}
+                              </Streamdown>
+                            )}
+                            {message.truncated && (
+                              <span className="text-muted-foreground">（内容已截断）</span>
+                            )}
                           </MessageContent>
                         </Message>
                       </MessageScrollerItem>
@@ -279,19 +279,6 @@ export function ChatView({ botId }: { botId: string }) {
                       <Spinner />
                     </MarkerIcon>
                     <MarkerContent>正在发送消息…</MarkerContent>
-                  </Marker>
-                </MessageScrollerItem>
-              )}
-              {messaging.currentAcceptedSubmissionId !== null && (
-                <MessageScrollerItem messageId="status:accepted">
-                  <Marker role="status" className="animate-fade-in">
-                    <MarkerIcon>
-                      <Spinner />
-                    </MarkerIcon>
-                    <MarkerContent>
-                      消息已发送
-                      {messaging.acceptedSubmissionStatus?.status === "queued" ? " · 排队中" : ""}
-                    </MarkerContent>
                   </Marker>
                 </MessageScrollerItem>
               )}
@@ -367,15 +354,13 @@ export function ChatView({ botId }: { botId: string }) {
               }
             }}
           />
-          <InputGroupAddon align="block-end">
-            <span className="text-muted-foreground flex-1 px-2 text-xs">
-              Enter 发送 · Shift + Enter 换行
-            </span>
+          <InputGroupAddon align="block-end" className="pt-1">
             <InputGroupButton
               aria-label={messaging.pendingSubmission ? "重试" : "发送"}
               size="icon-sm"
               variant="default"
               type="submit"
+              className="ml-auto"
               disabled={
                 !hasConversation ||
                 connection.busy ||

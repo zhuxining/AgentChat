@@ -167,7 +167,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-it("shows pending versus accepted input, refreshes replies, and stops polling when unmounted", async () => {
+it("shows pending input, clears the composer, refreshes replies, and stops polling when unmounted", async () => {
   let currentSnapshot = initialSnapshot;
   const submission = deferred<{ id: number }>();
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
@@ -187,7 +187,7 @@ it("shows pending versus accepted input, refreshes replies, and stops polling wh
   expect(runnerClient.submit).toHaveBeenCalledWith(41, "检查任务状态", expect.any(String));
 
   submission.resolve({ id: 73 });
-  expect(await screen.findByText(/消息已发送/)).toBeTruthy();
+  await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
 
   currentSnapshot = {
     ...initialSnapshot,
