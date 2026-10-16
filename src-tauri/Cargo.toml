@@ -62,4 +62,8 @@ keyring = { version = "=3.6.3", default-features = false, features = ["apple-nat
 keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "=3.6.3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust", "vendored"] }
+keyring = { version = "=3.6.3", default-features = false, features = [
+  "linux-native-sync-persistent",
+  "crypto-rust",
+  "vendored",
+] }

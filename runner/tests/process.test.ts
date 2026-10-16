@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+
 import { describe, expect, it } from "vite-plus/test";
 
 type RunnerResponse = {

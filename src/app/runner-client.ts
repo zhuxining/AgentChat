@@ -45,7 +45,12 @@ export type ConversationSnapshot = {
       tools: string[];
     };
   };
-  goal: { description: string; status: "open" | "completed"; updatedAt: number; completedAt: number | null };
+  goal: {
+    description: string;
+    status: "open" | "completed";
+    updatedAt: number;
+    completedAt: number | null;
+  };
   messages: ProjectedMessage[];
   hasMoreMessages: boolean;
   activeTasks: {
@@ -108,10 +113,13 @@ export const runnerClient = {
   submit: (conversationId: number, text: string, requestId: string) =>
     request<{ id: number }>({ op: "submit", conversationId, text, requestId }),
   abortSubmission: (conversationId: number, submissionId: number) =>
-    request<{ status: "aborted" | "already_placed" | "settled" | "not_found" }>(
-      { op: "abortSubmission", conversationId, submissionId },
-    ),
-  snapshot: (conversationId: number) => request<ConversationSnapshot>({ op: "snapshot", conversationId }),
+    request<{ status: "aborted" | "already_placed" | "settled" | "not_found" }>({
+      op: "abortSubmission",
+      conversationId,
+      submissionId,
+    }),
+  snapshot: (conversationId: number) =>
+    request<ConversationSnapshot>({ op: "snapshot", conversationId }),
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
   setProviderCredential: (apiKey: string | null) =>
     invoke<{ configured: boolean; runnerUpdated: boolean }>("set_provider_credential", { apiKey }),

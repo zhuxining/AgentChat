@@ -14,7 +14,9 @@ const candidates = ["node", "node.exe"].flatMap((binary) => [
 ]);
 const source = candidates.find((path) => existsSync(path));
 if (!source) {
-  throw new Error(`找不到当前目标的 Node runtime（${platformPackage}）；请在目标平台执行 bun install。`);
+  throw new Error(
+    `找不到当前目标的 Node runtime（${platformPackage}）；请在目标平台执行 bun install。`,
+  );
 }
 
 const runtimeDir = resolve(runnerRoot, "runtime");

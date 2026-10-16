@@ -43,10 +43,13 @@ process.stdin.on("end", () => {
   if (terminating) return;
   const shouldCloseHarness = !closing;
   closing = true;
-  void Promise.allSettled([...pendingDispatches]).then(async () => {
-    if (shouldCloseHarness) await app.handle({ op: "close" });
-    process.exit(0);
-  }, () => process.exit(1));
+  void Promise.allSettled([...pendingDispatches]).then(
+    async () => {
+      if (shouldCloseHarness) await app.handle({ op: "close" });
+      process.exit(0);
+    },
+    () => process.exit(1),
+  );
 });
 
 function trackDispatch(line: string) {
@@ -65,10 +68,13 @@ function terminateProtocol(reason: string) {
   closing = true;
   process.stdin.pause();
   process.stderr.write(`${reason}\n`);
-  void Promise.allSettled([...pendingDispatches]).then(async () => {
-    if (shouldCloseHarness) await app.handle({ op: "close" });
-    process.exit(1);
-  }, () => process.exit(1));
+  void Promise.allSettled([...pendingDispatches]).then(
+    async () => {
+      if (shouldCloseHarness) await app.handle({ op: "close" });
+      process.exit(1);
+    },
+    () => process.exit(1),
+  );
 }
 
 async function dispatch(line: string) {
@@ -118,9 +124,14 @@ function send(
   exit = false,
 ) {
   const serialized = JSON.stringify(response);
-  const line = Buffer.byteLength(serialized, "utf8") + 1 <= maxMessageBytes
-    ? serialized
-    : JSON.stringify({ id: response.id, ok: false, error: "Runner response exceeded the size limit" });
+  const line =
+    Buffer.byteLength(serialized, "utf8") + 1 <= maxMessageBytes
+      ? serialized
+      : JSON.stringify({
+          id: response.id,
+          ok: false,
+          error: "Runner response exceeded the size limit",
+        });
   process.stdout.write(`${line}\n`, () => {
     if (exit) process.exit(0);
   });

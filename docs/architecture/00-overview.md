@@ -33,14 +33,14 @@ flowchart LR
     Harness --> Storage[Session / Storage]
 ```
 
-| 模块 | 职责 |
-| --- | --- |
-| React UI | 当前桌面 App 已实现 Bot、Conversation、工作目标、Task、凭据与 Runner 状态；手机 UI 尚未实现 |
-| Tauri 宿主 | 桌面平台装配、系统能力、类型化 IPC、安全存储与 Runner 子进程管理 |
-| Rust Device Core | [规划] 身份与配对、本地 Projection、网络 Outbox、Relay 同步和操作路由 |
+| 模块                | 职责                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| React UI            | 当前桌面 App 已实现 Bot、Conversation、工作目标、Task、凭据与 Runner 状态；手机 UI 尚未实现                               |
+| Tauri 宿主          | 桌面平台装配、系统能力、类型化 IPC、安全存储与 Runner 子进程管理                                                          |
+| Rust Device Core    | [规划] 身份与配对、本地 Projection、网络 Outbox、Relay 同步和操作路由                                                     |
 | TypeScript 应用适配 | 当前 Runner 实现 Bot/Conversation 用例、models/Registry/ExecutionEnv/Storage/Harness 装配、公开 API 调用和状态 Projection |
-| Harness | Commit、Entry、Document、Submission、内置 Task 调度与执行恢复 |
-| Relay | [规划] 密文存储、定向投递、增量拉取、通知、设备在线状态和撤销 |
+| Harness             | Commit、Entry、Document、Submission、内置 Task 调度与执行恢复                                                             |
+| Relay               | [规划] 密文存储、定向投递、增量拉取、通知、设备在线状态和撤销                                                             |
 
 ## 数据与行为边界
 
@@ -179,14 +179,14 @@ contracts/ 先保持跨语言 schema/fixtures 目录，有真实共享 JS 代码
 
 Interface 包含调用者必须了解的参数、约束、错误、顺序和资源生命周期，不只是类型声明。应用 Module 集中产品规则，Implementation 内部直接组合 pi-durable；“薄应用适配”不要求把所有库细节暴露给 UI。
 
-| Module / Interface 所在位置 | 调用方需要知道 | Implementation 隐藏的复杂性与测试面 |
-| --- | --- | --- |
-| Bot 与 Conversation 用例：runner/src/application.ts | Bot ID、允许覆盖项；归档或忙时更新返回明确拒绝 | 配置快照、空闲时显式应用、目标 Document、提交幂等与 Task Graph Projection；通过 Harness 用例测试 |
-| 聊天投递：src-tauri/src/commands/mod.rs（本机） | 类型化 Runner 操作、请求/响应与有界等待；网络超时不等于未接纳 | 本机 IPC 关联、帧大小与错误转换；多端 Outbox/Relay 尚未实现 |
-| 前端聊天展示：src/App.tsx 与 src/app/runner-client.ts | 提交、停止并读取快照；Runner Projection 定时刷新 | 待确认/已接纳状态映射、回复刷新与卸载后清理；由 happy-dom UI 测试验证 |
-| Runner 展示投影：runner/src/application.ts | 读取已提交状态与 Task 摘要 | pi-durable 公开 Harness view 到 Conversation Projection 的转换；由真实 Harness 测试验证 |
-| 承载进程：src-tauri/src/runner.rs | 启动、请求与关闭；区分取消等待和停止工作 | JSON Lines 序列化、响应关联、有界消息读取、资源所有权和退出等待；macOS `.app` 启停已冒烟验证 |
-| 平台秘密：src-tauri/src/credentials.rs | 按引用保存/取用/移除秘密；访问失败可观察 | 系统凭据库适配与秘密生命周期；密钥通过私有 Runner IPC 进入 Provider 闭包，不进入工具环境或 Projection |
+| Module / Interface 所在位置                           | 调用方需要知道                                                | Implementation 隐藏的复杂性与测试面                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Bot 与 Conversation 用例：runner/src/application.ts   | Bot ID、允许覆盖项；归档或忙时更新返回明确拒绝                | 配置快照、空闲时显式应用、目标 Document、提交幂等与 Task Graph Projection；通过 Harness 用例测试      |
+| 聊天投递：src-tauri/src/commands/mod.rs（本机）       | 类型化 Runner 操作、请求/响应与有界等待；网络超时不等于未接纳 | 本机 IPC 关联、帧大小与错误转换；多端 Outbox/Relay 尚未实现                                           |
+| 前端聊天展示：src/App.tsx 与 src/app/runner-client.ts | 提交、停止并读取快照；Runner Projection 定时刷新              | 待确认/已接纳状态映射、回复刷新与卸载后清理；由 happy-dom UI 测试验证                                 |
+| Runner 展示投影：runner/src/application.ts            | 读取已提交状态与 Task 摘要                                    | pi-durable 公开 Harness view 到 Conversation Projection 的转换；由真实 Harness 测试验证               |
+| 承载进程：src-tauri/src/runner.rs                     | 启动、请求与关闭；区分取消等待和停止工作                      | JSON Lines 序列化、响应关联、有界消息读取、资源所有权和退出等待；macOS `.app` 启停已冒烟验证          |
+| 平台秘密：src-tauri/src/credentials.rs                | 按引用保存/取用/移除秘密；访问失败可观察                      | 系统凭据库适配与秘密生命周期；密钥通过私有 Runner IPC 进入 Provider 闭包，不进入工具环境或 Projection |
 
 这些路径是 Interface 的放置位置，不意味着每个 Module 都要导出一个类或每个函数都另建文件。进程内配置转换与映射优先直接组合函数。Device Core 在装配处接受所需的本地数据、网络连接、凭据访问和桌面进程等真实依赖，测试从相同 Interface 观察结果；不为单一实现先建 Repository、Driver、抽象 Base 或通用传输框架。只有生产与测试/平台两种 Adapter 都有明确消费者时才提取对应 Seam，内部 Seam 不因测试需要而暴露给 UI。
 

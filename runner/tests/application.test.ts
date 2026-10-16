@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
   createAssistantMessageEventStream,
   type AssistantMessage,
@@ -6,14 +9,17 @@ import {
 } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { createApplicationRunner } from "../src/application.js";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
 });
 
 async function createFixture(models?: MutableModels) {
@@ -68,18 +74,27 @@ function deterministicModels(delayMs = 0, honorAbort = false): MutableModels {
   const stream: ProviderStreams["stream"] = (_model, _context, options) => {
     const events = createAssistantMessageEventStream();
     events.push({ type: "start", partial: { ...model, content: [], stopReason: "pending" } });
-    const complete = () => events.push({ type: "done", reason: "stop", message: { ...model, content: [...model.content] } });
+    const complete = () =>
+      events.push({
+        type: "done",
+        reason: "stop",
+        message: { ...model, content: [...model.content] },
+      });
     const timer = delayMs > 0 ? setTimeout(complete, delayMs) : undefined;
     if (timer === undefined) queueMicrotask(complete);
     if (honorAbort) {
-      options?.signal?.addEventListener("abort", () => {
-        if (timer !== undefined) clearTimeout(timer);
-        events.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...model, stopReason: "aborted", errorMessage: "aborted" },
-        });
-      }, { once: true });
+      options?.signal?.addEventListener(
+        "abort",
+        () => {
+          if (timer !== undefined) clearTimeout(timer);
+          events.push({
+            type: "error",
+            reason: "aborted",
+            error: { ...model, stopReason: "aborted", errorMessage: "aborted" },
+          });
+        },
+        { once: true },
+      );
     }
     return events;
   };
@@ -112,7 +127,10 @@ function deterministicModels(delayMs = 0, honorAbort = false): MutableModels {
   return models;
 }
 
-async function waitForActiveTask(runner: Awaited<ReturnType<typeof createApplicationRunner>>, conversationId: number) {
+async function waitForActiveTask(
+  runner: Awaited<ReturnType<typeof createApplicationRunner>>,
+  conversationId: number,
+) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const snapshot = (await runner.handle({ op: "snapshot", conversationId })) as {
@@ -124,13 +142,20 @@ async function waitForActiveTask(runner: Awaited<ReturnType<typeof createApplica
   throw new Error("pi-durable 未在限定时间内启动 Conversation Task");
 }
 
-async function waitForReply(runner: Awaited<ReturnType<typeof createApplicationRunner>>, conversationId: number) {
+async function waitForReply(
+  runner: Awaited<ReturnType<typeof createApplicationRunner>>,
+  conversationId: number,
+) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const snapshot = (await runner.handle({ op: "snapshot", conversationId })) as {
       messages: { role: string; text: string }[];
     };
-    if (snapshot.messages.some((message) => message.role === "assistant" && message.text === "确定性回复")) {
+    if (
+      snapshot.messages.some(
+        (message) => message.role === "assistant" && message.text === "确定性回复",
+      )
+    ) {
       return snapshot;
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -150,9 +175,16 @@ describe("Runner application Interface", () => {
         bots: { id: string; instructions: string }[];
         conversations: { id: number; botId: string }[];
       };
-      expect(initialized.bots).toContainEqual(expect.objectContaining({ id: bot.id, instructions: "用简体中文回答。" }));
-      expect(initialized.conversations).toContainEqual(expect.objectContaining({ id: conversation.id, botId: bot.id }));
-      const snapshot = (await reopened.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      expect(initialized.bots).toContainEqual(
+        expect.objectContaining({ id: bot.id, instructions: "用简体中文回答。" }),
+      );
+      expect(initialized.conversations).toContainEqual(
+        expect.objectContaining({ id: conversation.id, botId: bot.id }),
+      );
+      const snapshot = (await reopened.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         conversation: {
           botName: string;
           agent: {
@@ -185,7 +217,10 @@ describe("Runner application Interface", () => {
     const { dataDir, runner } = await createFixture();
     try {
       const { conversation } = await createBotAndConversation(runner, "gpt-5-mini", "");
-      const snapshot = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const snapshot = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         conversation: { agent: { cwd: string } };
       };
       expect(snapshot.conversation.agent.cwd).toBe(dataDir);
@@ -197,8 +232,16 @@ describe("Runner application Interface", () => {
   it("applies a Conversation cwd override to its Agent snapshot", async () => {
     const { runner } = await createFixture();
     try {
-      const { conversation } = await createBotAndConversation(runner, "gpt-5-mini", "", "/tmp/agentchat-work");
-      const snapshot = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const { conversation } = await createBotAndConversation(
+        runner,
+        "gpt-5-mini",
+        "",
+        "/tmp/agentchat-work",
+      );
+      const snapshot = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         conversation: { agent: { cwd: string } };
       };
       expect(snapshot.conversation.agent.cwd).toBe("/tmp/agentchat-work");
@@ -223,27 +266,46 @@ describe("Runner application Interface", () => {
         tools: ["read"],
       });
 
-      const unchanged = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
-        conversation: { botRevision: number; agent: { instructions: string; cwd: string; thinkingLevel: string } };
+      const unchanged = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
+        conversation: {
+          botRevision: number;
+          agent: { instructions: string; cwd: string; thinkingLevel: string };
+        };
       };
       expect(unchanged.conversation.botRevision).toBe(1);
-      expect(unchanged.conversation.agent).toEqual(expect.objectContaining({
-        instructions: "用简体中文回答。",
-        cwd: process.cwd(),
-        thinkingLevel: "medium",
-      }));
+      expect(unchanged.conversation.agent).toEqual(
+        expect.objectContaining({
+          instructions: "用简体中文回答。",
+          cwd: process.cwd(),
+          thinkingLevel: "medium",
+        }),
+      );
 
       await runner.handle({ op: "applyBotSettings", conversationId: conversation.id });
-      const applied = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
-        conversation: { botName: string; botRevision: number; agent: { instructions: string; cwd: string; thinkingLevel: string; tools: string[] } };
+      const applied = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
+        conversation: {
+          botName: string;
+          botRevision: number;
+          agent: { instructions: string; cwd: string; thinkingLevel: string; tools: string[] };
+        };
       };
-      expect(applied.conversation).toEqual(expect.objectContaining({ botName: "新版本地助手", botRevision: 2 }));
-      expect(applied.conversation.agent).toEqual(expect.objectContaining({
-        instructions: "更新后的指令。",
-        cwd: "/tmp/agentchat-new-default",
-        thinkingLevel: "high",
-        tools: ["read"],
-      }));
+      expect(applied.conversation).toEqual(
+        expect.objectContaining({ botName: "新版本地助手", botRevision: 2 }),
+      );
+      expect(applied.conversation.agent).toEqual(
+        expect.objectContaining({
+          instructions: "更新后的指令。",
+          cwd: "/tmp/agentchat-new-default",
+          thinkingLevel: "high",
+          tools: ["read"],
+        }),
+      );
     } finally {
       await runner.handle({ op: "close" });
     }
@@ -271,8 +333,9 @@ describe("Runner application Interface", () => {
         extensions: ["coding-tools"],
         tools: ["read"],
       });
-      await expect(runner.handle({ op: "applyBotSettings", conversationId: conversation.id }))
-        .rejects.toThrow("必须等它空闲后才能应用 Bot 设置");
+      await expect(
+        runner.handle({ op: "applyBotSettings", conversationId: conversation.id }),
+      ).rejects.toThrow("必须等它空闲后才能应用 Bot 设置");
       await waitForReply(runner, conversation.id);
     } finally {
       await runner.handle({ op: "close" });
@@ -283,29 +346,47 @@ describe("Runner application Interface", () => {
     const { runner } = await createFixture();
     const { bot, conversation } = await createBotAndConversation(runner);
     try {
-      await runner.handle({ op: "saveGoal", conversationId: conversation.id, description: "修复并验证本机功能" });
-      await runner.handle({ op: "setGoalStatus", conversationId: conversation.id, status: "completed" });
+      await runner.handle({
+        op: "saveGoal",
+        conversationId: conversation.id,
+        description: "修复并验证本机功能",
+      });
+      await runner.handle({
+        op: "setGoalStatus",
+        conversationId: conversation.id,
+        status: "completed",
+      });
       await runner.handle({ op: "archiveBot", botId: bot.id });
 
       const initialized = (await runner.handle({ op: "initialize" })) as {
         bots: { id: string; archived: boolean }[];
         conversations: { id: number; botId: string }[];
       };
-      expect(initialized.bots).toContainEqual(expect.objectContaining({ id: bot.id, archived: true }));
-      expect(initialized.conversations).toContainEqual(expect.objectContaining({ id: conversation.id, botId: bot.id }));
-      await expect(runner.handle({ op: "createConversation", botId: bot.id, cwd: "", goal: "" }))
-        .rejects.toThrow("Bot 不存在或已归档");
+      expect(initialized.bots).toContainEqual(
+        expect.objectContaining({ id: bot.id, archived: true }),
+      );
+      expect(initialized.conversations).toContainEqual(
+        expect.objectContaining({ id: conversation.id, botId: bot.id }),
+      );
+      await expect(
+        runner.handle({ op: "createConversation", botId: bot.id, cwd: "", goal: "" }),
+      ).rejects.toThrow("Bot 不存在或已归档");
 
-      const snapshot = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const snapshot = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         conversation: { botId: string };
         goal: { description: string; status: string; completedAt: number | null };
       };
       expect(snapshot.conversation.botId).toBe(bot.id);
-      expect(snapshot.goal).toEqual(expect.objectContaining({
-        description: "修复并验证本机功能",
-        status: "completed",
-        completedAt: expect.any(Number),
-      }));
+      expect(snapshot.goal).toEqual(
+        expect.objectContaining({
+          description: "修复并验证本机功能",
+          status: "completed",
+          completedAt: expect.any(Number),
+        }),
+      );
     } finally {
       await runner.handle({ op: "close" });
     }
@@ -328,10 +409,15 @@ describe("Runner application Interface", () => {
         text: "排队工作",
         requestId: "abort-queued-1",
       })) as { id: number };
-      const beforeAbort = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const beforeAbort = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         submissions: { id: number; status: string }[];
       };
-      expect(beforeAbort.submissions).toContainEqual(expect.objectContaining({ id: queued.id, status: "queued" }));
+      expect(beforeAbort.submissions).toContainEqual(
+        expect.objectContaining({ id: queued.id, status: "queued" }),
+      );
 
       const withdrawn = (await runner.handle({
         op: "abortSubmission",
@@ -339,9 +425,14 @@ describe("Runner application Interface", () => {
         submissionId: queued.id,
       })) as { status: string };
       expect(withdrawn.status).toBe("aborted");
-      expect(await runner.handle({ op: "abort", conversationId: conversation.id })).toEqual({ stopped: true });
+      expect(await runner.handle({ op: "abort", conversationId: conversation.id })).toEqual({
+        stopped: true,
+      });
 
-      const afterAbort = (await runner.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const afterAbort = (await runner.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         activeTasks: unknown[];
         submissions: { id: number; status: string }[];
       };
@@ -354,7 +445,10 @@ describe("Runner application Interface", () => {
   it("resumes an unfinished accepted run after Harness close and reopen", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "agentchat-runner-resume-"));
     temporaryDirectories.push(dataDir);
-    const initial = await createApplicationRunner({ dataDir, models: deterministicModels(60_000, true) });
+    const initial = await createApplicationRunner({
+      dataDir,
+      models: deterministicModels(60_000, true),
+    });
     const { bot, conversation } = await createBotAndConversation(initial, "test-model");
     await initial.handle({
       op: "submit",
@@ -367,14 +461,20 @@ describe("Runner application Interface", () => {
 
     const reopened = await createApplicationRunner({ dataDir, models: deterministicModels() });
     try {
-      const current = (await reopened.handle({ op: "snapshot", conversationId: conversation.id })) as {
+      const current = (await reopened.handle({
+        op: "snapshot",
+        conversationId: conversation.id,
+      })) as {
         conversation: { botId: string };
         messages: { role: string; text: string }[];
       };
       expect(current.conversation.botId).toBe(bot.id);
       const completed = await waitForReply(reopened, conversation.id);
-      expect(completed.messages.filter((message) => message.role === "assistant" && message.text === "确定性回复"))
-        .toHaveLength(1);
+      expect(
+        completed.messages.filter(
+          (message) => message.role === "assistant" && message.text === "确定性回复",
+        ),
+      ).toHaveLength(1);
     } finally {
       await reopened.handle({ op: "close" });
     }
@@ -386,9 +486,13 @@ describe("Runner application Interface", () => {
     const { runner } = await createFixture();
     try {
       expect(process.env.OPENAI_API_KEY).toBeUndefined();
-      const initialized = (await runner.handle({ op: "initialize" })) as { apiKeyConfigured: boolean };
+      const initialized = (await runner.handle({ op: "initialize" })) as {
+        apiKeyConfigured: boolean;
+      };
       expect(initialized.apiKeyConfigured).toBe(true);
-      expect(await runner.handle({ op: "setProviderCredential", apiKey: null })).toEqual({ configured: false });
+      expect(await runner.handle({ op: "setProviderCredential", apiKey: null })).toEqual({
+        configured: false,
+      });
       expect(process.env.OPENAI_API_KEY).toBeUndefined();
     } finally {
       await runner.handle({ op: "close" });
@@ -412,7 +516,9 @@ describe("Runner application Interface", () => {
       expect(retried.id).toBe(first.id);
 
       const snapshot = await waitForReply(runner, conversation.id);
-      expect(snapshot.messages).toContainEqual(expect.objectContaining({ role: "assistant", text: "确定性回复" }));
+      expect(snapshot.messages).toContainEqual(
+        expect.objectContaining({ role: "assistant", text: "确定性回复" }),
+      );
     } finally {
       await runner.handle({ op: "close" });
     }

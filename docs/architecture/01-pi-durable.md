@@ -12,18 +12,18 @@ Conversation 由不可变 Entry 组成，Agent 选择保存在 pi.agent。submit
 
 ## 应用动作与公开 API
 
-| 应用动作 | 使用的 pi-durable 能力 |
-| --- | --- |
-| 创建 Conversation | createConversation；init 保存应用来源/目标 Document |
-| 发送输入 | Conversation.submit，传递稳定 requestId |
-| 查询提交结果 | Submission、Submission.wait、Harness.submission |
-| 更新会话配置 | configure；应用仅在空闲时开放 |
-| 撤回已排队输入 | Submission.abort |
-| 停止当前 Conversation | Conversation.abort，按库定义的作用范围 |
-| 显示回复与工具状态 | viewState/watch，必要时 watchEvents |
-| 展示执行任务 | taskGraph/watchTaskGraph |
-| Bot 档案、工作目标与归档 | defineDoc 和公开 Commit/tx API |
-| 关闭与恢复 | Harness.close、Harness.open、resume |
+| 应用动作                 | 使用的 pi-durable 能力                              |
+| ------------------------ | --------------------------------------------------- |
+| 创建 Conversation        | createConversation；init 保存应用来源/目标 Document |
+| 发送输入                 | Conversation.submit，传递稳定 requestId             |
+| 查询提交结果             | Submission、Submission.wait、Harness.submission     |
+| 更新会话配置             | configure；应用仅在空闲时开放                       |
+| 撤回已排队输入           | Submission.abort                                    |
+| 停止当前 Conversation    | Conversation.abort，按库定义的作用范围              |
+| 显示回复与工具状态       | viewState/watch，必要时 watchEvents                 |
+| 展示执行任务             | taskGraph/watchTaskGraph                            |
+| Bot 档案、工作目标与归档 | defineDoc 和公开 Commit/tx API                      |
+| 关闭与恢复               | Harness.close、Harness.open、resume                 |
 
 输入来源、Conversation 归属和产品参数由应用校验；通过校验后调用库接口，不重新定义 Submission/Run 的状态流转。底层 tx.createSubmission 不用于绕过 submit 的 busy/inbox 规则。跨设备的签名与重试规则见[多端请求](02-multi-device.md#操作信封与接纳)。
 
@@ -41,13 +41,13 @@ extensions/tools 使用显式列表表达精确选择；需要继承的字段必
 
 ## Document 与执行 Storage
 
-| 数据 | 归属 |
-| --- | --- |
-| Conversation、Entry、Submission、Task | Runner 的 Harness/Storage |
-| Agent、运行进度、inbox、usage | pi.agent、pi.live、pi.inbox、pi.usage |
-| Bot 默认配置与非敏感 Provider 选择 | 应用 Session Document |
-| 来源 Bot、目标、标题与归档 | 应用 Conversation Document |
-| Provider 密钥 | Runner 平台安全存储 |
+| 数据                                  | 归属                                  |
+| ------------------------------------- | ------------------------------------- |
+| Conversation、Entry、Submission、Task | Runner 的 Harness/Storage             |
+| Agent、运行进度、inbox、usage         | pi.agent、pi.live、pi.inbox、pi.usage |
+| Bot 默认配置与非敏感 Provider 选择    | 应用 Session Document                 |
+| 来源 Bot、目标、标题与归档            | 应用 Conversation Document            |
+| Provider 密钥                         | Runner 平台安全存储                   |
 
 应用用 defineDoc 定义 app.* kind，区别于内置 pi.*；scope、version、history 和 fork 行为按实际业务选择。目标状态由用户确认，Submission done、Run 结束或 Task completed 均不自动表示目标完成。
 

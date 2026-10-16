@@ -1,5 +1,9 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
+import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import {
   AgentDoc,
   configure,
@@ -16,18 +20,15 @@ import {
   type SubmissionId,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import type { Conversation, ConversationId } from "@earendil-works/pi-durable";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
   createBashTool,
   createEditTool,
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-durable/tools";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import type { Conversation, ConversationId } from "@earendil-works/pi-durable";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 
 const context = BACKGROUND_CONTEXT;
 const maxTextLength = 16_000;
@@ -90,7 +91,13 @@ const ConversationDoc = defineDoc<ConversationMetadata>({
   scope: "conversation",
   history: "latest",
   fork: "current",
-  initial: () => ({ botId: "", botName: "Conversation", botRevision: 0, cwdOverride: null, createdAt: 0 }),
+  initial: () => ({
+    botId: "",
+    botName: "Conversation",
+    botRevision: 0,
+    cwdOverride: null,
+    createdAt: 0,
+  }),
 });
 const GoalDoc = defineDoc<GoalDocument>({
   kind: "app.work-goal",
@@ -138,9 +145,15 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
           resolve: async ({ credential, signal }) => {
             signal.throwIfAborted();
             if (credential?.key) {
-              return { auth: { apiKey: credential.key }, env: credential.env, source: "stored credential" };
+              return {
+                auth: { apiKey: credential.key },
+                env: credential.env,
+                source: "stored credential",
+              };
             }
-            return providerApiKey ? { auth: { apiKey: providerApiKey }, source: "Runner credential" } : undefined;
+            return providerApiKey
+              ? { auth: { apiKey: providerApiKey }, source: "Runner credential" }
+              : undefined;
           },
         },
       },
@@ -150,7 +163,10 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
   registry.install(workGoalExtension);
   registry.install(codingToolsExtension);
   const extensionByName = new Map<string, Extension>(
-    registry.snapshot().installed().map((extension) => [extension.name, extension]),
+    registry
+      .snapshot()
+      .installed()
+      .map((extension) => [extension.name, extension]),
   );
   const toolByName = new Map<string, ToolRegistration>(
     toolDefinitions.map((tool) => [tool.name, tool]),
@@ -173,7 +189,10 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
   let mutationQueue = Promise.resolve();
   function mutate<T>(operation: () => Promise<T>): Promise<T> {
     const result = mutationQueue.then(operation);
-    mutationQueue = result.then(() => undefined, () => undefined);
+    mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
     return result;
   }
 
@@ -197,7 +216,8 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
     const selectedExtensions = [
       workGoalExtension,
       ...bot.extensions.map((name) => {
-        if (name === workGoalExtension.name) throw new Error(`Extension「${name}」由 AgentChat 管理`);
+        if (name === workGoalExtension.name)
+          throw new Error(`Extension「${name}」由 AgentChat 管理`);
         const extension = extensionByName.get(name);
         if (!extension) throw new Error(`Bot 选择的 Extension「${name}」当前不可用`);
         return extension;
@@ -239,13 +259,17 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
         ...missing.missingExtensions.map((name) => `Extension「${name}」`),
         ...missing.missingTools.map((name) => `Tool「${name}」`),
       ].join("、");
-      throw new Error(`Conversation 配置引用了当前不可用的 ${details}。请编辑 Bot 后显式应用可用配置。`);
+      throw new Error(
+        `Conversation 配置引用了当前不可用的 ${details}。请编辑 Bot 后显式应用可用配置。`,
+      );
     }
   }
 
   async function requireIdleConversation(conversation: Conversation) {
     const inspection = await harness.inspect(context);
-    const liveTasks = inspection.tasks.some((task) => task.record.conversationId === conversation.id);
+    const liveTasks = inspection.tasks.some(
+      (task) => task.record.conversationId === conversation.id,
+    );
     const unsettledSubmissions = inspection.submissions.some(
       (submission) =>
         submission.conversationId === conversation.id &&
@@ -268,9 +292,7 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
       const messages: MessageProjection[] = state.value.entries
         .slice(-maxProjectedMessages)
         .map((entry) => {
-          const model = entry.model?.[0] as
-            | { role?: string; content?: unknown }
-            | undefined;
+          const model = entry.model?.[0] as { role?: string; content?: unknown } | undefined;
           const text = Array.isArray(model?.content)
             ? model.content
                 .map((part) => {
@@ -308,7 +330,11 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
         }));
       const submissions = inspection.submissions
         .filter((submission) => submission.conversationId === conversation.id)
-        .map((submission) => ({ id: submission.id, type: submission.type, status: submission.status }));
+        .map((submission) => ({
+          id: submission.id,
+          type: submission.type,
+          status: submission.status,
+        }));
       return {
         conversation: {
           id: conversation.id,
@@ -353,7 +379,9 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
               .installed()
               .map((extension) => extension.name)
               .filter((name) => name !== workGoalExtension.name),
-            tools: installed.tools().map(({ extension, tool }) => ({ name: tool.name, extension: extension.name })),
+            tools: installed
+              .tools()
+              .map(({ extension, tool }) => ({ name: tool.name, extension: extension.name })),
           },
           apiKeyConfigured: Boolean(providerApiKey),
           runtimeVersion: process.version,
@@ -386,7 +414,9 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
           resolveAgentChange(bot);
           await harness.commit(async (tx) => {
             const document = await tx.doc(BotsDoc);
-            document.bots = document.bots.map((item) => (item.id === botId ? bot : normalizeBot(item)));
+            document.bots = document.bots.map((item) =>
+              item.id === botId ? bot : normalizeBot(item),
+            );
           }, context);
           return { bot, bots: await storedBots() };
         });
@@ -429,13 +459,25 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
                 const document = await tx.doc(BotsDoc);
                 document.conversations = [
                   ...document.conversations,
-                  { id: conversationId, botId: bot.id, botName: bot.name, botRevision: bot.revision, createdAt },
+                  {
+                    id: conversationId,
+                    botId: bot.id,
+                    botName: bot.name,
+                    botRevision: bot.revision,
+                    createdAt,
+                  },
                 ];
               },
             },
             context,
           );
-          return { id: conversation.id, botId: bot.id, botName: bot.name, botRevision: bot.revision, createdAt: Date.now() };
+          return {
+            id: conversation.id,
+            botId: bot.id,
+            botName: bot.name,
+            botRevision: bot.revision,
+            createdAt: Date.now(),
+          };
         });
       case "applyBotSettings":
         return mutate(async () => {
@@ -496,7 +538,10 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
           await requireAvailableConfiguration(conversation);
           const text = stringField(input, "text", maxTextLength);
           const requestId = stringField(input, "requestId", 100);
-          const submission = await conversation.submit({ type: "input", content: text, requestId }, context);
+          const submission = await conversation.submit(
+            { type: "input", content: text, requestId },
+            context,
+          );
           return { id: submission.id };
         });
       case "abortSubmission":
@@ -504,7 +549,11 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
           const conversationId = numberField(input, "conversationId");
           await requireConversation(conversationId);
           const submissionId = numberField(input, "submissionId");
-          const status = await harness.abortSubmission(submissionId as SubmissionId, context, conversationId as ConversationId);
+          const status = await harness.abortSubmission(
+            submissionId as SubmissionId,
+            context,
+            conversationId as ConversationId,
+          );
           return { status };
         });
       case "snapshot":
@@ -517,7 +566,10 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
         });
       case "setProviderCredential": {
         const apiKey = input.apiKey;
-        if (apiKey !== null && (typeof apiKey !== "string" || apiKey.trim().length === 0 || apiKey.length > 8_000)) {
+        if (
+          apiKey !== null &&
+          (typeof apiKey !== "string" || apiKey.trim().length === 0 || apiKey.length > 8_000)
+        ) {
           throw new Error("Provider 凭据无效");
         }
         providerApiKey = apiKey === null ? undefined : apiKey;
@@ -538,8 +590,12 @@ function normalizeBot(bot: Bot): Bot {
   return {
     ...bot,
     thinkingLevel: thinkingLevels.includes(bot.thinkingLevel) ? bot.thinkingLevel : "medium",
-    extensions: Array.isArray(bot.extensions) ? bot.extensions.filter((name) => typeof name === "string") : [codingToolsExtension.name],
-    tools: Array.isArray(bot.tools) ? bot.tools.filter((name) => typeof name === "string") : defaultToolNames,
+    extensions: Array.isArray(bot.extensions)
+      ? bot.extensions.filter((name) => typeof name === "string")
+      : [codingToolsExtension.name],
+    tools: Array.isArray(bot.tools)
+      ? bot.tools.filter((name) => typeof name === "string")
+      : defaultToolNames,
     revision: Number.isSafeInteger(bot.revision) && bot.revision > 0 ? bot.revision : 1,
     archived: bot.archived === true,
   };
@@ -602,13 +658,22 @@ function stringField(
   return value.trim();
 }
 
-function stringArrayField(input: Record<string, unknown>, name: string, maxItems: number): string[] {
+function stringArrayField(
+  input: Record<string, unknown>,
+  name: string,
+  maxItems: number,
+): string[] {
   const value = input[name];
-  if (!Array.isArray(value) || value.length > maxItems || value.some((item) => typeof item !== "string")) {
+  if (
+    !Array.isArray(value) ||
+    value.length > maxItems ||
+    value.some((item) => typeof item !== "string")
+  ) {
     throw new Error(`字段 ${name} 无效`);
   }
   const values = value.map((item) => (item as string).trim());
-  if (values.some((item) => item.length === 0 || item.length > 120)) throw new Error(`字段 ${name} 无效`);
+  if (values.some((item) => item.length === 0 || item.length > 120))
+    throw new Error(`字段 ${name} 无效`);
   return values;
 }
 

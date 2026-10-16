@@ -6,11 +6,11 @@
 
 每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。
 
-| 边界 | 方式与责任 |
-| --- | --- |
-| React ↔ 本机 Device Core | 类型化 Tauri IPC，提供操作、快照与订阅事件 |
-| 桌面 Device Core ↔ 承载进程 | 薄 API 适配，调用公开能力并读取视图；编码待验证 |
-| Device Core ↔ Relay | HTTPS 上传/拉取密文，WebSocket 通知变化与在线状态 |
+| 边界                        | 方式与责任                                        |
+| --------------------------- | ------------------------------------------------- |
+| React ↔ 本机 Device Core    | 类型化 Tauri IPC，提供操作、快照与订阅事件        |
+| 桌面 Device Core ↔ 承载进程 | 薄 API 适配，调用公开能力并读取视图；编码待验证   |
+| Device Core ↔ Relay         | HTTPS 上传/拉取密文，WebSocket 通知变化与在线状态 |
 
 Relay 独立于桌面应用，可部署自有实例；托管地址和运营方式未确定。开发时局域网运行 Relay 不改变生产跨网络拓扑。Relay 保存密文同步记录、定向 Envelope/receipt、传输序号、配对邮箱、设备登记和在线状态；设备按持久化游标拉取，WS 只发变化提示，不承担完整数据传输或通知重放。
 
@@ -54,13 +54,13 @@ Outbox 在上传失败时持久化重试。客户端乐观输入行按来源操�
 
 ## Projection 与应用存储
 
-| 数据 | 用途与权威边界 |
-| --- | --- |
-| Identity、Device 身份与 Relay 连接信息 | 应用通信身份与连接状态 |
-| 本地 Projection | 所属 Runner 权威状态的可重建展示数据 |
-| 本机 Outbox | 待上传数据与尚未送达的操作，不替代 pi.inbox |
-| 拉取游标 | Relay 传输进度，不代表 Harness 执行进度 |
-| Relay 密文记录与定向消息 | 同步和投递存储，不作为执行 Storage |
+| 数据                                   | 用途与权威边界                              |
+| -------------------------------------- | ------------------------------------------- |
+| Identity、Device 身份与 Relay 连接信息 | 应用通信身份与连接状态                      |
+| 本地 Projection                        | 所属 Runner 权威状态的可重建展示数据        |
+| 本机 Outbox                            | 待上传数据与尚未送达的操作，不替代 pi.inbox |
+| 拉取游标                               | Relay 传输进度，不代表 Harness 执行进度     |
+| Relay 密文记录与定向消息               | 同步和投递存储，不作为执行 Storage          |
 
 Runner 从已提交 Conversation、Document 和 Task 视图生成 Projection，携带 Runner/Conversation 标识和稳定 Entry ID。同步支持快照或增量 upsert；可变状态需经过验证的应用版本语义，客户端拒绝旧状态覆盖新状态。删除/归档用 tombstone，不根据记录消失猜测。
 

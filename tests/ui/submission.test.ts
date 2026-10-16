@@ -1,14 +1,20 @@
-import { afterEach, expect, it, vi } from "vite-plus/test";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act, createElement } from "react";
+import { afterEach, expect, it, vi } from "vite-plus/test";
+
 import App from "../../src/App";
-import { runnerClient, type ConversationSnapshot, type InitializeResult } from "../../src/app/runner-client";
+import {
+  runnerClient,
+  type ConversationSnapshot,
+  type InitializeResult,
+} from "../../src/app/runner-client";
 
 vi.mock("../../src/app/runner-client", () => ({
   runnerClient: {
-    initialize: vi.fn(),
-    snapshot: vi.fn(),
-    submit: vi.fn(),
+    initialize: vi.fn<() => Promise<InitializeResult>>(),
+    snapshot: vi.fn<(conversationId: number) => Promise<ConversationSnapshot>>(),
+    submit:
+      vi.fn<(conversationId: number, text: string, requestId: string) => Promise<{ id: number }>>(),
   },
 }));
 
