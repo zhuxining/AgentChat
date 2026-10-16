@@ -1,4 +1,4 @@
-import { PlusIcon, SearchIcon, SettingsIcon, SparklesIcon } from "lucide-react";
+import { PanelLeftIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon } from "lucide-react";
 
 import type { Bot } from "@/app/runner-client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -23,6 +23,7 @@ type Props = {
   onSelect: (botId: string) => void;
   onNewBot: () => void;
   onSettings: () => void;
+  onToggleSidebar?: () => void;
 };
 
 export function BotList({
@@ -35,6 +36,7 @@ export function BotList({
   onSelect,
   onNewBot,
   onSettings,
+  onToggleSidebar,
 }: Props) {
   const active = bots.filter((bot) => !bot.archived);
   const query = search.trim().toLowerCase();
@@ -44,11 +46,19 @@ export function BotList({
       <header
         data-window-titlebar
         data-window-titlebar-leading
-        className="flex h-16 shrink-0 items-center justify-between px-4"
+        className="flex h-16 shrink-0 items-center justify-end gap-1 px-4"
       >
-        <span className="font-semibold" data-window-drag-region>
-          AgentChat
-        </span>
+        {onToggleSidebar && (
+          <Button
+            aria-label="收起 Bot 侧栏"
+            title="收起 Bot 侧栏"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggleSidebar}
+          >
+            <PanelLeftIcon />
+          </Button>
+        )}
         <Button
           aria-label="新建 Bot"
           variant="ghost"

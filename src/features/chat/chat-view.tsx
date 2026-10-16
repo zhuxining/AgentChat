@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { cn } from "cn";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -55,7 +56,7 @@ export function ChatView({ botId }: { botId: string }) {
   const { selection, connection, feedback, messaging, conversation, actions } = workspace;
   const navigate = useNavigate();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { detailsOpen, toggleDetails } = useWorkspaceUi();
+  const { detailsOpen, toggleDetails, botListOpen } = useWorkspaceUi();
   const segments = useBotTimeline(selection.botConversations, {
     id: selection.conversationId,
     snapshot: selection.snapshot,
@@ -86,7 +87,10 @@ export function ChatView({ botId }: { botId: string }) {
     >
       <header
         data-window-titlebar
-        className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4"
+        className={cn(
+          "flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4",
+          !botListOpen && "md:pr-14",
+        )}
       >
         <Button
           aria-label="返回 Bot 列表"

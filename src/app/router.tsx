@@ -9,12 +9,13 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { SparklesIcon } from "lucide-react";
+import { PanelLeftIcon, SparklesIcon } from "lucide-react";
 import { useEffect } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
 import { useWorkspaceUi } from "@/app/workspace-ui";
+import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -43,18 +44,37 @@ function WorkspaceShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { botSearch, setBotSearch, detailsOpen, detailsAnimating } = useWorkspaceUi();
+  const {
+    botSearch,
+    setBotSearch,
+    botListOpen,
+    setBotListOpen,
+    toggleBotList,
+    detailsOpen,
+    detailsAnimating,
+  } = useWorkspaceUi();
+  const botListPanelRef = usePanelRef();
+  const detailsPanelRef = usePanelRef();
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
   const isChatRoute = Boolean(chatMatch) && !newBotMatch;
-  const detailsPanelRef = usePanelRef();
   const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
     conversationId: workspace.selection.conversationId,
     latestMessage:
       workspace.selection.snapshot?.messages.filter((message) => message.text).at(-1)?.text ?? "",
     executing: workspace.conversation.executing,
   });
+  useEffect(() => {
+    const panel = botListPanelRef.current;
+    if (!panel || settingsMatch) return;
+    try {
+      if (botListOpen) panel.expand();
+      else panel.collapse();
+    } catch {
+      // The group has no measurable layout yet (first paint); the next toggle retries.
+    }
+  }, [botListOpen, botListPanelRef, settingsMatch]);
   // The details pane collapses to zero instead of unmounting: removing the panel would
   // redistribute its width across the remaining panels and shift the Bot list.
   useEffect(() => {
@@ -68,6 +88,7 @@ function WorkspaceShell() {
       // the next toggle still works because the state stays the source of truth.
     }
   }, [detailsOpen, isChatRoute, detailsPanelRef]);
+
   if (workspace.connection.loading) {
     return (
       <main className="text-muted-foreground grid h-full place-items-center text-sm">
@@ -92,22 +113,41 @@ function WorkspaceShell() {
       onSearchChange={setBotSearch}
       onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
       onNewBot={() => void navigate({ to: "/bots/new" })}
+      onToggleSidebar={toggleBotList}
       onSettings={() =>
         void navigate({ to: "/settings/$section", params: { section: "provider" } })
       }
     />
   );
   return (
-    <main className="bg-background text-foreground flex h-full min-h-0 overflow-hidden">
+    <main className="bg-background text-foreground relative flex h-full min-h-0 overflow-hidden">
+      {!settingsMatch && !botListOpen && (
+        <div className="pointer-events-none absolute top-4 right-4 z-30">
+          <Button
+            aria-label="展开 Bot 侧栏"
+            title="展开 Bot 侧栏"
+            variant="ghost"
+            size="icon-sm"
+            className="pointer-events-auto"
+            onClick={toggleBotList}
+          >
+            <PanelLeftIcon />
+          </Button>
+        </div>
+      )}
       <ResizablePanelGroup>
         {!settingsMatch && (
           <>
             <ResizablePanel
               id="bots"
+              panelRef={botListPanelRef}
+              collapsible
+              collapsedSize={0}
               defaultSize={260}
               minSize={200}
               maxSize={420}
               groupResizeBehavior="preserve-pixel-size"
+              onResize={(size) => setBotListOpen(size.inPixels > 0)}
               className="overflow-hidden"
             >
               <aside
