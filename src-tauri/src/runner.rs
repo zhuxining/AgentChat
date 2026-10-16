@@ -376,6 +376,7 @@ impl RunnerProcess {
             .arg(&entry)
             .arg("--data-dir")
             .arg(data_dir)
+            .env_remove("DEEPSEEK_API_KEY")
             .env_remove("OPENAI_API_KEY")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

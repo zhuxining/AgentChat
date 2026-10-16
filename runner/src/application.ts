@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import {
   AgentDoc,
   configure,
@@ -127,17 +127,35 @@ type RunnerOptions = { dataDir: string; models?: MutableModels };
 
 export async function createApplicationRunner({ dataDir, models: providedModels }: RunnerOptions) {
   await mkdir(dataDir, { recursive: true });
-  let providerApiKey = process.env.OPENAI_API_KEY;
-  // NodeExecutionEnv gives child tools their configured shell environment; keep the Provider secret out of it.
+  let providerApiKey = process.env.DEEPSEEK_API_KEY;
+  // NodeExecutionEnv gives child tools their configured shell environment; keep secrets out of it.
+  delete process.env.DEEPSEEK_API_KEY;
   delete process.env.OPENAI_API_KEY;
   const toolEnvironment = { ...process.env };
   const models = providedModels ?? createModels();
   if (!providedModels) {
-    const provider = openaiProvider();
+    const provider = deepseekProvider();
     const apiKeyAuth = provider.auth.apiKey;
-    if (!apiKeyAuth) throw new Error("OpenAI Provider 未配置 API Key 认证接口");
+    if (!apiKeyAuth) throw new Error("DeepSeek Provider 未配置 API Key 认证接口");
+    // pi-ai's bundled DeepSeek catalog currently lists V4 IDs, not the public chat/reasoner API aliases.
+    // Register both aliases with conservative limits until they appear in the upstream catalog.
+    const reference = provider.getModels()[0];
+    if (!reference) throw new Error("DeepSeek Provider 缺少模型定义");
+    const aliases = (["deepseek-chat", "deepseek-reasoner"] as const).map((id) => ({
+      ...reference,
+      id,
+      name: id,
+      input: ["text"] as ("text" | "image")[],
+      reasoning: id === "deepseek-reasoner",
+      thinkingLevelMap: undefined,
+      contextWindow: 64_000,
+      maxTokens: 8_192,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    }));
     models.setProvider({
       ...provider,
+      getModels: () => aliases,
+      getAllModels: () => aliases,
       auth: {
         ...provider.auth,
         apiKey: {
@@ -213,6 +231,9 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
   }
 
   function resolveAgentChange(bot: Bot): AgentChange {
+    if (!models.getModel(bot.model.provider, bot.model.modelId)) {
+      throw new Error(`模型「${bot.model.provider}/${bot.model.modelId}」当前不可用`);
+    }
     const selectedExtensions = [
       workGoalExtension,
       ...bot.extensions.map((name) => {
@@ -254,6 +275,12 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
 
   async function requireAvailableConfiguration(conversation: Conversation) {
     const missing = await configurationErrors(conversation);
+    const agent = await conversation.agent(context);
+    if (agent.model && !models.getModel(agent.model.provider, agent.model.modelId)) {
+      throw new Error(
+        `当前 Conversation 的模型「${agent.model.provider}/${agent.model.modelId}」不可用。请编辑 Bot 选择 DeepSeek 模型，再对该 Conversation 显式应用 Bot 设置。`,
+      );
+    }
     if (missing.missingExtensions.length || missing.missingTools.length) {
       const details = [
         ...missing.missingExtensions.map((name) => `Extension「${name}」`),
@@ -293,18 +320,22 @@ export async function createApplicationRunner({ dataDir, models: providedModels 
         .slice(-maxProjectedMessages)
         .map((entry) => {
           const model = entry.model?.[0] as { role?: string; content?: unknown } | undefined;
-          const text = Array.isArray(model?.content)
-            ? model.content
-                .map((part) => {
-                  if (!part || typeof part !== "object") return "";
-                  const item = part as { type?: string; text?: string; name?: string };
-                  if (item.type === "text") return item.text ?? "";
-                  if (item.type === "toolCall") return `调用工具：${item.name ?? "工具"}`;
-                  return "";
-                })
-                .filter(Boolean)
-                .join("\n")
-            : "";
+          // User entries use string content; assistant/tool entries may use structured blocks.
+          const text =
+            typeof model?.content === "string"
+              ? model.content
+              : Array.isArray(model?.content)
+                ? model.content
+                    .map((part) => {
+                      if (!part || typeof part !== "object") return "";
+                      const item = part as { type?: string; text?: string; name?: string };
+                      if (item.type === "text") return item.text ?? "";
+                      if (item.type === "toolCall") return `调用工具：${item.name ?? "工具"}`;
+                      return "";
+                    })
+                    .filter(Boolean)
+                    .join("\n")
+                : "";
           const role =
             model?.role === "user"
               ? "user"
@@ -619,7 +650,7 @@ function parseBot(
   return {
     ...base,
     name,
-    model: { provider: "openai", modelId },
+    model: { provider: "deepseek", modelId },
     thinkingLevel,
     instructions,
     cwd,

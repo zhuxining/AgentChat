@@ -1,10 +1,10 @@
 use keyring::{Entry, Error};
 
 const SERVICE: &str = "com.syneju.agentchat";
-const OPENAI_API_KEY: &str = "openai-api-key";
+const DEEPSEEK_API_KEY: &str = "deepseek-api-key";
 
-pub fn read_openai_api_key() -> Result<Option<String>, String> {
-    let entry = Entry::new(SERVICE, OPENAI_API_KEY)
+pub fn read_deepseek_api_key() -> Result<Option<String>, String> {
+    let entry = Entry::new(SERVICE, DEEPSEEK_API_KEY)
         .map_err(|error| format!("打开系统凭据库失败：{error}"))?;
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
@@ -13,16 +13,16 @@ pub fn read_openai_api_key() -> Result<Option<String>, String> {
     }
 }
 
-pub fn effective_openai_api_key() -> (Option<String>, Option<String>) {
-    let environment_key = std::env::var("OPENAI_API_KEY").ok();
-    match read_openai_api_key() {
+pub fn effective_deepseek_api_key() -> (Option<String>, Option<String>) {
+    let environment_key = std::env::var("DEEPSEEK_API_KEY").ok();
+    match read_deepseek_api_key() {
         Ok(stored_key) => (stored_key.or(environment_key), None),
         Err(error) => (environment_key, Some(error)),
     }
 }
 
-pub fn write_openai_api_key(value: Option<&str>) -> Result<(), String> {
-    let entry = Entry::new(SERVICE, OPENAI_API_KEY)
+pub fn write_deepseek_api_key(value: Option<&str>) -> Result<(), String> {
+    let entry = Entry::new(SERVICE, DEEPSEEK_API_KEY)
         .map_err(|error| format!("打开系统凭据库失败：{error}"))?;
     match value {
         Some(value) => entry

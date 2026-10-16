@@ -56,7 +56,7 @@ pub async fn set_provider_credential(
 
     let persisted_key = api_key.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        credentials::write_openai_api_key(persisted_key.as_deref())
+        credentials::write_deepseek_api_key(persisted_key.as_deref())
     })
     .await
     .map_err(|error| format!("系统凭据存储任务失败：{error}"))??;
@@ -64,7 +64,7 @@ pub async fn set_provider_credential(
 
     let runner_key = api_key
         .clone()
-        .or_else(|| std::env::var("OPENAI_API_KEY").ok());
+        .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok());
     let configured = runner_key.is_some();
     let Ok(process) = runner.process() else {
         return Ok(ProviderCredentialReply {
@@ -98,7 +98,7 @@ pub async fn set_provider_credential(
 #[tauri::command]
 pub async fn restart_runner(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (api_key, credential_warning) = credentials::effective_openai_api_key();
+        let (api_key, credential_warning) = credentials::effective_deepseek_api_key();
         let runner = app.state::<RunnerState>();
         runner.restart(api_key)?;
         runner.set_credential_warning(credential_warning);

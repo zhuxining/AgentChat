@@ -37,7 +37,7 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let resource_dir = app.path().resource_dir()?;
-            let (api_key, credential_warning) = credentials::effective_openai_api_key();
+            let (api_key, credential_warning) = credentials::effective_deepseek_api_key();
             app.manage(runner::RunnerState::new(
                 data_dir.join("runner"),
                 resource_dir,

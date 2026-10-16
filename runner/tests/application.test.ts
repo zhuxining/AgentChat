@@ -31,7 +31,7 @@ async function createFixture(models?: MutableModels) {
 
 async function createBotAndConversation(
   runner: Awaited<ReturnType<typeof createApplicationRunner>>,
-  modelId = "gpt-5-mini",
+  modelId = "deepseek-chat",
   cwd = process.cwd(),
   conversationCwd = "",
 ) {
@@ -53,12 +53,16 @@ async function createBotAndConversation(
   return { bot, conversation };
 }
 
-function deterministicModels(delayMs = 0, honorAbort = false): MutableModels {
+function deterministicModels(
+  delayMs = 0,
+  honorAbort = false,
+  providerId = "deepseek",
+): MutableModels {
   const model: AssistantMessage = {
     role: "assistant",
     content: [{ type: "text", text: "确定性回复" }],
     api: "openai-responses",
-    provider: "openai",
+    provider: providerId,
     model: "test-model",
     usage: {
       input: 1,
@@ -99,7 +103,7 @@ function deterministicModels(delayMs = 0, honorAbort = false): MutableModels {
     return events;
   };
   const provider = createProvider({
-    id: "openai",
+    id: providerId,
     auth: {
       apiKey: {
         name: "Deterministic test credential",
@@ -111,7 +115,7 @@ function deterministicModels(delayMs = 0, honorAbort = false): MutableModels {
         id: "test-model",
         name: "Deterministic test model",
         api: "openai-responses",
-        provider: "openai",
+        provider: providerId,
         baseUrl: "https://test.invalid",
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -164,6 +168,28 @@ async function waitForReply(
 }
 
 describe("Runner application Interface", () => {
+  it("registers both DeepSeek API aliases and rejects unavailable models", async () => {
+    const { runner } = await createFixture();
+    try {
+      for (const modelId of ["deepseek-chat", "deepseek-reasoner"]) {
+        const { bot, conversation } = await createBotAndConversation(runner, modelId);
+        const state = (await runner.handle({
+          op: "snapshot",
+          conversationId: conversation.id,
+        })) as {
+          conversation: { botId: string; agent: { model: { provider: string; modelId: string } } };
+        };
+        expect(state.conversation.botId).toBe(bot.id);
+        expect(state.conversation.agent.model).toEqual({ provider: "deepseek", modelId });
+      }
+      await expect(createBotAndConversation(runner, "gpt-5-mini")).rejects.toThrow(
+        "模型「deepseek/gpt-5-mini」当前不可用",
+      );
+    } finally {
+      await runner.handle({ op: "close" });
+    }
+  });
+
   it("persists Bot configuration and Conversation snapshot across Harness reopen", async () => {
     const { dataDir, runner } = await createFixture();
     const { bot, conversation } = await createBotAndConversation(runner);
@@ -200,7 +226,7 @@ describe("Runner application Interface", () => {
       };
       expect(snapshot.conversation.botName).toBe("本地助手");
       expect(snapshot.conversation.agent).toEqual({
-        model: { provider: "openai", modelId: "gpt-5-mini" },
+        model: { provider: "deepseek", modelId: "deepseek-chat" },
         thinkingLevel: "medium",
         instructions: "用简体中文回答。",
         cwd: process.cwd(),
@@ -216,7 +242,7 @@ describe("Runner application Interface", () => {
   it("uses the Runner data directory when a Bot has no cwd override", async () => {
     const { dataDir, runner } = await createFixture();
     try {
-      const { conversation } = await createBotAndConversation(runner, "gpt-5-mini", "");
+      const { conversation } = await createBotAndConversation(runner, "deepseek-chat", "");
       const snapshot = (await runner.handle({
         op: "snapshot",
         conversationId: conversation.id,
@@ -234,7 +260,7 @@ describe("Runner application Interface", () => {
     try {
       const { conversation } = await createBotAndConversation(
         runner,
-        "gpt-5-mini",
+        "deepseek-chat",
         "",
         "/tmp/agentchat-work",
       );
@@ -481,11 +507,11 @@ describe("Runner application Interface", () => {
   });
 
   it("keeps the Provider key out of process and child tool environments", async () => {
-    const priorApiKey = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = "test-secret-that-must-not-reach-tools";
+    const priorApiKey = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "test-secret-that-must-not-reach-tools";
     const { runner } = await createFixture();
     try {
-      expect(process.env.OPENAI_API_KEY).toBeUndefined();
+      expect(process.env.DEEPSEEK_API_KEY).toBeUndefined();
       const initialized = (await runner.handle({ op: "initialize" })) as {
         apiKeyConfigured: boolean;
       };
@@ -493,11 +519,11 @@ describe("Runner application Interface", () => {
       expect(await runner.handle({ op: "setProviderCredential", apiKey: null })).toEqual({
         configured: false,
       });
-      expect(process.env.OPENAI_API_KEY).toBeUndefined();
+      expect(process.env.DEEPSEEK_API_KEY).toBeUndefined();
     } finally {
       await runner.handle({ op: "close" });
-      if (priorApiKey === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = priorApiKey;
+      if (priorApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = priorApiKey;
     }
   });
 
@@ -516,6 +542,9 @@ describe("Runner application Interface", () => {
       expect(retried.id).toBe(first.id);
 
       const snapshot = await waitForReply(runner, conversation.id);
+      expect(snapshot.messages).toContainEqual(
+        expect.objectContaining({ role: "user", text: "请打招呼" }),
+      );
       expect(snapshot.messages).toContainEqual(
         expect.objectContaining({ role: "assistant", text: "确定性回复" }),
       );

@@ -1,4 +1,18 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  ArrowUpIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+  SquareIcon,
+  UsersIcon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import {
   runnerClient,
@@ -9,14 +23,40 @@ import {
   type InitializeResult,
   type RunnerCapabilities,
 } from "@/app/runner-client";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
 type PendingSubmission = { conversationId: number; text: string; requestId: string };
 const defaultInstructions = "用简体中文回答，先给出直接结论。";
 
 export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [botDialogOpen, setBotDialogOpen] = useState(false);
+  const [chatDialogOpen, setChatDialogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const messagesRef = useRef<HTMLDivElement>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [capabilities, setCapabilities] = useState<RunnerCapabilities>({
@@ -37,7 +77,7 @@ export default function App() {
   const [providerKey, setProviderKey] = useState("");
   const [editBotId, setEditBotId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [modelId, setModelId] = useState("gpt-5-mini");
+  const [modelId, setModelId] = useState("deepseek-chat");
   const [thinkingLevel, setThinkingLevel] = useState<Bot["thinkingLevel"]>("medium");
   const [instructions, setInstructions] = useState(defaultInstructions);
   const [cwd, setCwd] = useState("");
@@ -141,6 +181,13 @@ export default function App() {
 
   const selectedBot = bots.find((bot) => bot.id === selectedBotId && !bot.archived);
   const linkedBot = bots.find((bot) => bot.id === snapshot?.conversation.botId);
+  const activeBot = snapshot ? linkedBot : selectedBot;
+  const lastMessageId = snapshot?.messages.at(-1)?.id;
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [conversationId, lastMessageId]);
+
   const hasLiveTasks = (snapshot?.activeTasks.length ?? 0) > 0;
   const executing = snapshot?.activeTasks.some((task) => task.status === "running") ?? false;
   const executionStatus = executing ? "执行中" : hasLiveTasks ? "等待中" : "空闲";
@@ -153,7 +200,7 @@ export default function App() {
   function beginNewBot() {
     setEditBotId(null);
     setName("");
-    setModelId("gpt-5-mini");
+    setModelId("deepseek-chat");
     setThinkingLevel("medium");
     setInstructions(defaultInstructions);
     setCwd("");
@@ -169,7 +216,7 @@ export default function App() {
     setEditBotId(bot.id);
     setSelectedBotId(bot.id);
     setName(bot.name);
-    setModelId(bot.model.modelId);
+    setModelId(bot.model.provider === "deepseek" ? bot.model.modelId : "deepseek-chat");
     setThinkingLevel(bot.thinkingLevel);
     setInstructions(bot.instructions);
     setCwd(bot.cwd);
@@ -209,8 +256,53 @@ export default function App() {
         const bot = await runnerClient.createBot(draft);
         setBots((previous) => [...previous, bot]);
         setSelectedBotId(bot.id);
+        setConversationId(null);
+        setBotDialogOpen(false);
         setNotice(`已创建 ${bot.name}。`);
+        try {
+          const conversation = await runnerClient.createConversation(bot.id, "", "");
+          setConversations((previous) => [conversation, ...previous]);
+          setConversationId(conversation.id);
+          setSearch("");
+        } catch (cause) {
+          setError(
+            `智能体已创建，但打开聊天失败：${errorMessage(cause)}。可以点击“开始聊天”重试。`,
+          );
+        }
       }
+      setBotDialogOpen(false);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startChat() {
+    if (selectedBot) {
+      await onCreateConversation();
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const bot = await runnerClient.createBot({
+        name: "幕僚长",
+        modelId: "deepseek-chat",
+        thinkingLevel: "medium",
+        instructions: defaultInstructions,
+        cwd: "",
+        extensions: [],
+        tools: [],
+      });
+      setBots((previous) => [...previous, bot]);
+      setSelectedBotId(bot.id);
+      const created = await runnerClient.createConversation(bot.id, conversationCwd, newGoal);
+      setConversations((previous) => [created, ...previous]);
+      setConversationId(created.id);
+      setChatDialogOpen(false);
+      setConversationCwd("");
+      setNewGoal("");
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -232,7 +324,7 @@ export default function App() {
       setConversationCwd("");
       setNewGoal("");
       setConversationId(created.id);
-      setNotice("Conversation 已创建，并保存了 Bot 配置快照。");
+      setChatDialogOpen(false);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -249,7 +341,8 @@ export default function App() {
       if (selectedBotId === bot.id)
         setSelectedBotId(result.bots.find((item) => !item.archived)?.id ?? "");
       if (editBotId === bot.id) beginNewBot();
-      setNotice(`${bot.name} 已归档；已有 Conversation 保留关联。`);
+      setBotDialogOpen(false);
+      setNotice(`${bot.name} 已归档；已有聊天保留关联。`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -353,7 +446,7 @@ export default function App() {
       setNotice(
         apiKey === null
           ? result.configured
-            ? "系统凭据库中的密钥已移除；Runner 仍使用 OPENAI_API_KEY 环境变量。"
+            ? "系统凭据库中的密钥已移除；当前使用 DEEPSEEK_API_KEY 环境变量。"
             : "已从系统凭据库移除 Provider 密钥。"
           : result.runnerUpdated
             ? "Provider 密钥已安全保存并交给 Runner。"
@@ -450,73 +543,557 @@ export default function App() {
   }
 
   return (
-    <main className="bg-workspace text-foreground grid h-full min-h-0 grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="bg-surface flex min-h-0 flex-col border-r">
-        <header className="border-b px-5 py-4">
-          <h1 className="text-lg font-semibold">AgentChat</h1>
-          <p className="text-muted-foreground mt-1 text-xs">
-            本地 pi-durable Runner{runtimeVersion ? ` · Node ${runtimeVersion}` : ""}
-          </p>
-        </header>
-
-        <section className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                Bots
-              </h2>
-              <Button onClick={beginNewBot} size="sm" variant="outline">
-                新建
+    <main className="bg-background text-foreground flex h-full min-h-0 overflow-hidden">
+      {sidebarOpen && (
+        <aside
+          aria-label="会话列表"
+          className="bg-sidebar flex w-64 shrink-0 flex-col border-r xl:w-72"
+        >
+          <header className="flex h-16 shrink-0 items-center justify-between px-4">
+            <span className="font-semibold" data-tauri-drag-region>
+              AgentChat
+            </span>
+            <div className="flex gap-1">
+              <Button
+                aria-label="收起会话列表"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <PanelLeftIcon />
+              </Button>
+              <Button
+                aria-label="新建聊天"
+                variant="ghost"
+                size="icon-sm"
+                disabled={busy}
+                onClick={() => setChatDialogOpen(true)}
+              >
+                <PlusIcon />
               </Button>
             </div>
-            <div className="space-y-1">
-              {bots.map((bot) => (
-                <div key={bot.id} className="flex items-center gap-1">
-                  <button
-                    className={`hover:bg-elevated focus-visible:outline-ring min-w-0 flex-1 rounded-md px-3 py-2 text-left text-sm focus-visible:outline-2 ${selectedBotId === bot.id ? "bg-elevated" : ""}`}
-                    onClick={() => setSelectedBotId(bot.id)}
-                    type="button"
-                  >
-                    <span className="block truncate">{bot.name}</span>
-                    <span className="text-muted-foreground block truncate text-xs">
-                      {bot.model.modelId} · r{bot.revision}
-                      {bot.archived ? " · 已归档" : ""}
+          </header>
+          <div className="px-3 pb-3">
+            <InputGroup>
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
+                aria-label="搜索会话"
+                placeholder="搜索"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </InputGroup>
+          </div>
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2" aria-label="聊天">
+            {conversations
+              .filter((item) => item.botName.toLowerCase().includes(search.toLowerCase()))
+              .map((conversation) => (
+                <Button
+                  key={conversation.id}
+                  variant={conversationId === conversation.id ? "secondary" : "ghost"}
+                  className="h-auto w-full justify-start gap-3 py-3"
+                  onClick={() => {
+                    setConversationId(conversation.id);
+                    setSelectedBotId(conversation.botId);
+                  }}
+                >
+                  <Avatar size="lg">
+                    <AvatarFallback>
+                      <SparklesIcon className="size-5" />
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{conversation.botName}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {formatDate(conversation.createdAt)}
+                      </span>
                     </span>
-                  </button>
-                  {!bot.archived && (
+                    <span className="text-muted-foreground mt-1 block truncate text-xs">
+                      {conversationId === conversation.id
+                        ? (snapshot?.messages.at(-1)?.text ?? "开始新的对话")
+                        : "点击继续聊天"}
+                    </span>
+                  </span>
+                </Button>
+              ))}
+            {conversations.length === 0 && (
+              <p className="text-muted-foreground px-3 py-6 text-sm">还没有聊天，点击 + 开始。</p>
+            )}
+            {conversations.length > 0 &&
+              !conversations.some((item) =>
+                item.botName.toLowerCase().includes(search.toLowerCase()),
+              ) && <p className="text-muted-foreground px-3 py-6 text-sm">没有找到匹配的会话。</p>}
+          </nav>
+          <footer className="flex items-center justify-between border-t p-3">
+            <Button
+              aria-label="设置"
+              title="设置"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <SettingsIcon />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                beginNewBot();
+                setBotDialogOpen(true);
+              }}
+            >
+              <UsersIcon />
+              智能体
+            </Button>
+          </footer>
+        </aside>
+      )}
+
+      <section aria-label="聊天内容" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4">
+          {!sidebarOpen && (
+            <Button
+              aria-label="展开会话列表"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <PanelLeftIcon />
+            </Button>
+          )}
+          <div className="min-w-0 flex-1" data-tauri-drag-region>
+            <h1 className="truncate text-sm font-semibold">
+              {snapshot?.conversation.botName ?? "AgentChat"}
+            </h1>
+            <p className="text-muted-foreground truncate text-xs">
+              DeepSeek · 本机{snapshot ? ` · ${executionStatus}` : ""}
+            </p>
+          </div>
+          {hasLiveTasks && (
+            <Button disabled={busy} size="sm" variant="outline" onClick={() => void onAbort()}>
+              <SquareIcon />
+              停止
+            </Button>
+          )}
+          <Button
+            aria-label={inspectorOpen ? "收起智能体资料" : "展开智能体资料"}
+            aria-expanded={inspectorOpen}
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setInspectorOpen((value) => !value)}
+          >
+            <PanelRightIcon />
+          </Button>
+        </header>
+        {(error || credentialWarning) && (
+          <div
+            role="alert"
+            className="text-destructive flex items-center justify-between gap-2 border-b px-5 py-3 text-sm"
+          >
+            <span>{error || credentialWarning}</span>
+            {runnerUnavailable && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void onRestartRunner()}
+              >
+                重新连接
+              </Button>
+            )}
+          </div>
+        )}
+        {notice && (
+          <div
+            role="status"
+            className="text-muted-foreground flex items-center justify-between gap-2 border-b px-5 py-2 text-xs"
+          >
+            <span>{notice}</span>
+            <Button
+              aria-label="关闭提示"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setNotice("")}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        )}
+        {snapshot && !providerConfigured && (
+          <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-5 py-2 text-xs">
+            <span>尚未检测到 DeepSeek 凭据。</span>
+            <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+              配置密钥
+            </Button>
+          </div>
+        )}
+        {snapshot &&
+          snapshot.configurationErrors.missingExtensions.length +
+            snapshot.configurationErrors.missingTools.length >
+            0 && (
+            <p role="alert" className="text-destructive border-b px-5 py-2 text-sm">
+              当前配置中有不可用的能力，请编辑智能体并应用配置。
+            </p>
+          )}
+
+        <div
+          ref={messagesRef}
+          aria-live="polite"
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-6"
+        >
+          <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {snapshot && (
+              <p className="text-muted-foreground text-center text-xs">
+                {formatDate(
+                  conversations.find((item) => item.id === conversationId)?.createdAt ?? 0,
+                )}
+              </p>
+            )}
+            {snapshot?.hasMoreMessages && (
+              <p className="text-muted-foreground text-center text-xs">显示最近 50 条消息</p>
+            )}
+            {snapshot?.messages
+              .filter((message) => message.text)
+              .map((message) => (
+                <Message key={message.id} align={message.role === "user" ? "end" : "start"}>
+                  <MessageContent>
+                    <MessageHeader>
+                      {message.role === "user"
+                        ? "你"
+                        : message.role === "assistant"
+                          ? snapshot.conversation.botName
+                          : message.role === "tool"
+                            ? "工具"
+                            : "系统"}
+                    </MessageHeader>
+                    <Card size="sm" className="w-fit max-w-[90%]">
+                      <CardContent className="text-sm leading-7 break-words whitespace-pre-wrap">
+                        {message.text}
+                        {message.truncated && (
+                          <span className="text-muted-foreground">（内容已截断）</span>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </MessageContent>
+                </Message>
+              ))}
+            {(!snapshot || snapshot.messages.length === 0) && (
+              <div className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
+                <Avatar size="lg">
+                  <AvatarFallback>
+                    <SparklesIcon />
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h2 className="font-medium">
+                    {snapshot ? `和${snapshot.conversation.botName}聊聊` : "有什么想一起完成的？"}
+                  </h2>
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    使用 DeepSeek，开始一次对话。
+                  </p>
+                </div>
+                {!snapshot && (
+                  <Button disabled={busy || runnerUnavailable} onClick={() => void startChat()}>
+                    <PlusIcon />
+                    开始聊天
+                  </Button>
+                )}
+              </div>
+            )}
+            {pendingSubmission?.conversationId === conversationId && (
+              <p className="text-muted-foreground text-xs">正在发送消息…</p>
+            )}
+            {currentAcceptedSubmissionId !== null && (
+              <p className="text-muted-foreground text-xs">
+                消息已发送
+                {acceptedSubmissionStatus?.status === "queued" ? " · 排队中" : ""}
+              </p>
+            )}
+            {snapshot?.submissions
+              .filter((submission) => submission.status === "queued")
+              .map((submission) => (
+                <div
+                  key={submission.id}
+                  className="flex items-center justify-between gap-2 text-xs"
+                >
+                  <span className="text-muted-foreground">消息 #{submission.id} 等待处理</span>
+                  {submission.type === "input" && (
                     <Button
-                      aria-label={`编辑 ${bot.name}`}
-                      disabled={busy}
-                      onClick={() => beginEditBot(bot)}
                       size="sm"
-                      variant="ghost"
-                    >
-                      编辑
-                    </Button>
-                  )}
-                  {!bot.archived && (
-                    <Button
-                      aria-label={`归档 ${bot.name}`}
+                      variant="outline"
                       disabled={busy}
-                      onClick={() => void onArchiveBot(bot)}
-                      size="sm"
-                      variant="ghost"
+                      onClick={() => void onWithdrawSubmission(submission.id)}
                     >
-                      归档
+                      撤回
                     </Button>
                   )}
                 </div>
               ))}
-              {bots.length === 0 && (
-                <p className="text-muted-foreground px-3 py-2 text-sm">创建一个 Bot 开始使用。</p>
-              )}
-            </div>
+            {hasLiveTasks && (
+              <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
+                <Spinner />
+                {executing ? "正在思考与执行…" : "等待处理…"}
+              </p>
+            )}
           </div>
+        </div>
+        <form className="px-5 pt-2 pb-4" onSubmit={(event) => void onSubmit(event)}>
+          <InputGroup className="mx-auto max-w-3xl">
+            <InputGroupTextarea
+              aria-label="发送消息"
+              className="max-h-40 min-h-16"
+              disabled={!snapshot || busy || pendingSubmission !== null}
+              placeholder={`发送消息给 ${snapshot?.conversation.botName ?? "智能体"}`}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
+            <InputGroupAddon align="block-end">
+              <InputGroupButton
+                aria-label="聊天设置"
+                size="icon-sm"
+                onClick={() => setInspectorOpen(true)}
+              >
+                <SlidersHorizontalIcon />
+              </InputGroupButton>
+              <span className="text-muted-foreground flex-1 text-xs">
+                Enter 发送 · Shift + Enter 换行
+              </span>
+              <InputGroupButton
+                aria-label={pendingSubmission ? "重试" : "发送"}
+                size="icon-sm"
+                variant="default"
+                type="submit"
+                disabled={
+                  !snapshot ||
+                  busy ||
+                  !input.trim() ||
+                  (pendingSubmission !== null &&
+                    pendingSubmission.conversationId !== conversationId)
+                }
+              >
+                <ArrowUpIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </form>
+      </section>
 
-          <form className="space-y-2 border-t pt-4" onSubmit={(event) => void onSaveBot(event)}>
-            <h2 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              {editBotId ? "编辑 Bot" : "新建 Bot"}
-            </h2>
+      {inspectorOpen && (
+        <aside
+          aria-label="智能体资料"
+          className="bg-sidebar flex w-72 shrink-0 flex-col border-l xl:w-80"
+        >
+          <header className="flex h-16 shrink-0 items-center justify-between border-b px-5">
+            <h2 className="text-sm font-medium">聊天信息</h2>
+            <Button
+              aria-label="关闭智能体资料"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setInspectorOpen(false)}
+            >
+              <PanelRightIcon />
+            </Button>
+          </header>
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+            <InspectorSection title="此聊天中的智能体">
+              <Card size="sm">
+                <CardContent className="flex items-center gap-3">
+                  <Avatar size="lg">
+                    <AvatarFallback>
+                      <SparklesIcon />
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{activeBot?.name ?? "未选择智能体"}</p>
+                    <p className="text-muted-foreground text-xs">DeepSeek · 本机</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </InspectorSection>
+            <InspectorSection
+              title="资料"
+              action={
+                activeBot && !activeBot.archived ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      beginEditBot(activeBot);
+                      setBotDialogOpen(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                ) : undefined
+              }
+            >
+              <Card size="sm">
+                <CardContent className="space-y-3">
+                  <InfoRow label="名称" value={activeBot?.name ?? "—"} />
+                  <Separator />
+                  <div>
+                    <p className="text-muted-foreground mb-2 text-xs">描述</p>
+                    <p className="text-sm leading-6 whitespace-pre-wrap">
+                      {activeBot?.instructions || "尚未设置描述"}
+                    </p>
+                  </div>
+                  <Separator />
+                  <InfoRow
+                    label="访问权限"
+                    value={activeBot?.tools.length ? "已启用本机工具" : "仅聊天"}
+                  />
+                  <p className="text-muted-foreground text-xs">工作目录不是文件访问隔离。</p>
+                </CardContent>
+              </Card>
+            </InspectorSection>
+            <InspectorSection title="运行方式">
+              <Card size="sm">
+                <CardContent className="space-y-3">
+                  <InfoRow label="服务商" value="DeepSeek" />
+                  <Separator />
+                  <InfoRow
+                    label="模型"
+                    value={
+                      snapshot?.conversation.agent.model?.modelId ??
+                      activeBot?.model.modelId ??
+                      "deepseek-chat"
+                    }
+                  />
+                  <Separator />
+                  <InfoRow
+                    label="思考"
+                    value={
+                      (snapshot?.conversation.agent.model?.modelId ?? activeBot?.model.modelId) ===
+                      "deepseek-reasoner"
+                        ? "深度思考"
+                        : "标准"
+                    }
+                  />
+                  <Separator />
+                  <InfoRow
+                    label="凭证"
+                    value={
+                      <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+                        {providerConfigured ? "已配置 · 更改" : "设置密钥"}
+                      </Button>
+                    }
+                  />
+                  <Separator />
+                  <div>
+                    <p className="text-muted-foreground mb-2 text-xs">工作目录</p>
+                    <p className="text-xs leading-5 break-all">
+                      {snapshot?.conversation.agent.cwd || activeBot?.cwd || "应用默认目录"}
+                    </p>
+                  </div>
+                  {hasUpdatedBotSettings && (
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || hasLiveTasks}
+                      onClick={() => void onApplyBotSettings()}
+                    >
+                      应用最新智能体设置
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </InspectorSection>
+            {snapshot && (
+              <InspectorSection title="工作目标">
+                <Card size="sm">
+                  <CardContent>
+                    <form className="space-y-3" onSubmit={(event) => void onSaveGoal(event)}>
+                      <Textarea
+                        aria-label="工作目标"
+                        placeholder="记录这次聊天要完成的工作"
+                        value={goalDraft}
+                        onChange={(event) =>
+                          setGoalDraftState({
+                            conversationId,
+                            updatedAt: goalUpdatedAt,
+                            value: event.target.value,
+                          })
+                        }
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          type="submit"
+                          disabled={busy || goalDraft === snapshot.goal.description}
+                        >
+                          保存
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy || !snapshot.goal.description.trim()}
+                          onClick={() =>
+                            void onSetGoalStatus(
+                              snapshot.goal.status === "open" ? "completed" : "open",
+                            )
+                          }
+                        >
+                          {snapshot.goal.status === "open" ? "确认完成" : "重新打开"}
+                        </Button>
+                      </div>
+                    </form>
+                  </CardContent>
+                </Card>
+              </InspectorSection>
+            )}
+            <InspectorSection
+              title="技能与工具"
+              action={
+                activeBot && !activeBot.archived ? (
+                  <Button
+                    aria-label="配置技能与工具"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => {
+                      beginEditBot(activeBot);
+                      setBotDialogOpen(true);
+                    }}
+                  >
+                    <PlusIcon />
+                  </Button>
+                ) : undefined
+              }
+            >
+              <Card size="sm">
+                <CardContent className="space-y-3">
+                  {(snapshot?.conversation.agent.tools ?? activeBot?.tools ?? []).map((tool) => (
+                    <div className="flex items-center gap-2 text-sm" key={tool}>
+                      <WrenchIcon className="text-muted-foreground size-4" />
+                      {tool}
+                    </div>
+                  ))}
+                  {!(snapshot?.conversation.agent.tools ?? activeBot?.tools)?.length && (
+                    <p className="text-muted-foreground text-sm">未启用工具</p>
+                  )}
+                </CardContent>
+              </Card>
+            </InspectorSection>
+          </div>
+        </aside>
+      )}
+
+      <Dialog open={botDialogOpen} onOpenChange={setBotDialogOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editBotId ? "编辑智能体" : "新建智能体"}</DialogTitle>
+            <DialogDescription>设置名称、描述、模型和可用工具。</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-3" onSubmit={(event) => void onSaveBot(event)}>
             <Input
               aria-label="Bot 名称"
               onChange={(event) => setName(event.target.value)}
@@ -524,12 +1101,18 @@ export default function App() {
               required
               value={name}
             />
-            <Input
-              aria-label="模型 ID"
-              onChange={(event) => setModelId(event.target.value)}
-              required
-              value={modelId}
-            />
+            <label className="block space-y-2 text-sm">
+              模型
+              <select
+                aria-label="模型 ID"
+                className="bg-background h-9 w-full rounded-md border px-2"
+                value={modelId}
+                onChange={(event) => setModelId(event.target.value)}
+              >
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="deepseek-reasoner">DeepSeek Reasoner · 深度思考</option>
+              </select>
+            </label>
             <label className="text-muted-foreground block text-xs">
               Thinking Level
               <select
@@ -609,373 +1192,189 @@ export default function App() {
                 disabled={busy || !name.trim() || !modelId.trim()}
                 type="submit"
               >
-                {editBotId ? "保存 Bot" : "创建 Bot"}
+                {editBotId ? "保存智能体" : "创建智能体"}
               </Button>
               {editBotId && (
-                <Button disabled={busy} onClick={beginNewBot} type="button" variant="outline">
+                <Button
+                  disabled={busy}
+                  onClick={() => setBotDialogOpen(false)}
+                  type="button"
+                  variant="outline"
+                >
                   取消
                 </Button>
               )}
             </div>
-          </form>
-
-          <section className="space-y-2 border-t pt-4">
-            <h2 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              Provider 凭据
-            </h2>
-            <Input
-              aria-label="OpenAI API Key"
-              autoComplete="off"
-              onChange={(event) => setProviderKey(event.target.value)}
-              placeholder={providerConfigured ? "密钥已配置；输入新密钥以替换" : "OpenAI API Key"}
-              type="password"
-              value={providerKey}
-            />
-            <div className="flex gap-2">
-              <Button
-                disabled={busy || !providerKey.trim()}
-                onClick={() => void onSetProviderCredential(providerKey.trim())}
-                size="sm"
-              >
-                安全保存
-              </Button>
-              <Button
-                disabled={busy || !providerConfigured}
-                onClick={() => void onSetProviderCredential(null)}
-                size="sm"
-                variant="outline"
-              >
-                移除密钥
-              </Button>
-            </div>
-            <p className="text-muted-foreground text-xs leading-5">
-              密钥保存在系统凭据库，由 Runner 使用，不会写入 Bot、对话或展示数据。
-              {providerConfigured ? "当前 Runner 已检测到凭据。" : "尚未检测到凭据。"}
-            </p>
-          </section>
-
-          <section className="space-y-2 border-t pt-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                Conversations
-              </h2>
-              <Button
-                disabled={!selectedBot || busy}
-                onClick={() => void onCreateConversation()}
-                size="sm"
-                variant="outline"
-              >
-                新建
-              </Button>
-            </div>
-            <Input
-              aria-label="Conversation 工作目录覆盖"
-              onChange={(event) => setConversationCwd(event.target.value)}
-              placeholder="本次工作目录覆盖（可留空）"
-              value={conversationCwd}
-            />
-            <Textarea
-              aria-label="新 Conversation 工作目标"
-              className="min-h-16 resize-y"
-              onChange={(event) => setNewGoal(event.target.value)}
-              placeholder="新 Conversation 的工作目标（可留空）"
-              value={newGoal}
-            />
-            <div className="space-y-1">
-              {conversations.map((conversation) => (
-                <button
-                  className={`hover:bg-elevated focus-visible:outline-ring block w-full truncate rounded-md px-3 py-2 text-left text-sm focus-visible:outline-2 ${conversationId === conversation.id ? "bg-elevated" : ""}`}
-                  key={conversation.id}
-                  onClick={() => setConversationId(conversation.id)}
-                  type="button"
-                >
-                  {conversation.botName} · #{conversation.id}
-                </button>
-              ))}
-            </div>
-          </section>
-        </section>
-      </aside>
-
-      <section className="flex min-h-0 flex-col">
-        <header className="flex min-h-14 items-center justify-between gap-4 border-b px-6 py-2">
-          <div className="min-w-0">
-            <h2 className="text-sm font-medium">
-              {snapshot?.conversation.botName ?? "选择或新建 Conversation"}
-            </h2>
-            {snapshot && (
-              <p
-                className="text-muted-foreground truncate text-xs"
-                title={snapshot.conversation.agent.cwd}
-              >
-                Conversation #{snapshot.conversation.id} ·{" "}
-                {snapshot.conversation.agent.model?.modelId ?? "无模型"} ·{" "}
-                {snapshot.conversation.agent.thinkingLevel} · 工作目录{" "}
-                {snapshot.conversation.agent.cwd} · {executionStatus}
+            {error && (
+              <p role="alert" className="text-destructive text-sm">
+                {error}
               </p>
             )}
-          </div>
-          <div className="flex shrink-0 gap-2">
-            {hasUpdatedBotSettings && (
-              <Button
-                disabled={busy || hasLiveTasks}
-                onClick={() => void onApplyBotSettings()}
-                variant="outline"
-              >
-                应用 Bot 更新
-              </Button>
-            )}
-            {hasLiveTasks && (
-              <Button disabled={busy} onClick={() => void onAbort()} variant="outline">
-                停止执行
-              </Button>
-            )}
-          </div>
-        </header>
-
-        {error && (
-          <div
-            className="border-danger/30 bg-danger/5 text-danger flex items-center justify-between gap-3 border-b px-6 py-2 text-sm"
-            role="alert"
-          >
-            <span>{error}</span>
-            {runnerUnavailable && (
-              <Button
-                disabled={busy}
-                onClick={() => void onRestartRunner()}
-                size="sm"
-                variant="outline"
-              >
-                重启 Runner
-              </Button>
-            )}
-          </div>
-        )}
-        {notice && (
-          <div
-            className="bg-surface text-muted-foreground border-b px-6 py-2 text-sm"
-            role="status"
-          >
-            {notice}
-          </div>
-        )}
-        {credentialWarning && (
-          <div className="bg-danger/5 text-danger border-b px-6 py-2 text-xs" role="alert">
-            {credentialWarning}。可检查系统凭据服务后重启 Runner。
-          </div>
-        )}
-        {snapshot &&
-          snapshot.configurationErrors.missingExtensions.length +
-            snapshot.configurationErrors.missingTools.length >
-            0 && (
-            <div
-              className="border-danger/30 bg-danger/5 text-danger border-b px-6 py-2 text-sm"
-              role="alert"
-            >
-              Conversation 配置引用了未加载的能力：
-              {[
-                ...snapshot.configurationErrors.missingExtensions,
-                ...snapshot.configurationErrors.missingTools,
-              ].join(", ")}
-              。编辑 Bot 并应用可用配置后才能继续提交。
-            </div>
-          )}
-        {snapshot && !snapshot.apiKeyConfigured && (
-          <div className="text-muted-foreground border-b px-6 py-2 text-xs">
-            Runner 未检测到 OpenAI 凭据。请在左侧 Provider 凭据中设置。
-          </div>
-        )}
-
-        {snapshot && (
-          <section className="bg-surface/60 border-b px-6 py-3">
-            <form
-              className="mx-auto flex max-w-5xl items-start gap-2"
-              onSubmit={(event) => void onSaveGoal(event)}
-            >
-              <div className="min-w-0 flex-1">
-                <label
-                  className="text-muted-foreground mb-1 block text-xs font-medium"
-                  htmlFor="work-goal"
-                >
-                  工作目标 · {snapshot.goal.status === "completed" ? "用户已确认完成" : "进行中"}
-                </label>
-                <Textarea
-                  id="work-goal"
-                  className="min-h-12 resize-y"
-                  onChange={(event) =>
-                    setGoalDraftState({
-                      conversationId,
-                      updatedAt: goalUpdatedAt,
-                      value: event.target.value,
-                    })
-                  }
-                  placeholder="记录这个 Conversation 要完成的工作"
-                  value={goalDraft}
-                />
-              </div>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button
-                  disabled={busy || goalDraft === snapshot.goal.description}
-                  size="sm"
-                  type="submit"
-                >
-                  保存目标
-                </Button>
-                {snapshot.goal.status === "open" ? (
-                  <Button
-                    disabled={busy || !snapshot.goal.description.trim()}
-                    onClick={() => void onSetGoalStatus("completed")}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    确认完成
-                  </Button>
-                ) : (
-                  <Button
-                    disabled={busy}
-                    onClick={() => void onSetGoalStatus("open")}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    重新打开
-                  </Button>
-                )}
-              </div>
-            </form>
-          </section>
-        )}
-
-        <div aria-live="polite" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-6">
-          {snapshot?.hasMoreMessages && (
-            <p className="text-muted-foreground text-center text-xs">
-              当前仅展示最近 50 条记录，历史分页尚未接入。
-            </p>
-          )}
-          {snapshot?.messages
-            .filter((message) => message.text)
-            .map((message) => (
-              <article
-                className={`max-w-3xl rounded-xl px-4 py-3 text-sm leading-6 whitespace-pre-wrap ${message.role === "user" ? "bg-elevated ml-auto" : "bg-card shadow-sm"}`}
-                key={message.id}
-              >
-                <p className="text-muted-foreground mb-1 text-[11px] font-medium uppercase">
-                  {message.role === "user" ? "你" : message.role === "assistant" ? "Agent" : "工具"}
-                </p>
-                {message.text}
-                {message.truncated && (
-                  <span className="text-muted-foreground ml-2 text-xs">（此条内容已截断）</span>
-                )}
-              </article>
-            ))}
-          {pendingSubmission && pendingSubmission.conversationId === conversationId && (
-            <p className="text-muted-foreground mx-auto max-w-3xl text-xs">
-              正在等待 Runner 确认接纳。发生超时后重试会复用同一 requestId。
-            </p>
-          )}
-          {currentAcceptedSubmissionId !== null && (
-            <p className="text-muted-foreground mx-auto max-w-3xl text-xs">
-              Runner 已接纳输入 #{currentAcceptedSubmissionId}
-              {acceptedSubmissionStatus
-                ? ` · ${acceptedSubmissionStatus.status === "queued" ? "排队中" : "已写入对话记录"}`
-                : " · 已结算或等待展示更新"}
-            </p>
-          )}
-          {snapshot?.submissions
-            .filter((submission) => submission.status === "queued")
-            .map((submission) => (
-              <div
-                className="text-muted-foreground mx-auto flex max-w-3xl items-center justify-between rounded-md border px-3 py-2 text-xs"
-                key={submission.id}
-              >
-                <span>输入 #{submission.id} 正在 Runner 队列中，尚未写入对话记录。</span>
-                {submission.type === "input" && (
-                  <Button
-                    disabled={busy}
-                    onClick={() => void onWithdrawSubmission(submission.id)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    撤回排队输入
-                  </Button>
-                )}
-              </div>
-            ))}
-          {snapshot?.activeTasks.length ? (
-            <section
-              className="bg-surface mx-auto max-w-3xl rounded-lg border p-3"
-              aria-label="Task Graph"
-            >
-              <h3 className="text-muted-foreground mb-2 text-xs font-semibold">当前 Task Graph</h3>
-              <div className="space-y-1">
-                {snapshot.activeTasks.map((task) => (
-                  <div
-                    className={`flex flex-wrap gap-x-2 text-xs ${task.owner !== null ? "pl-5" : ""}`}
-                    key={task.id}
-                  >
-                    <span className="font-medium">
-                      {task.kind} #{task.id}
-                    </span>
-                    <span>
-                      {task.status}
-                      {task.phase ? ` · ${task.phase}` : ""}
-                    </span>
-                    {task.owner !== null && (
-                      <span className="text-muted-foreground">owner #{task.owner}</span>
-                    )}
-                    {task.background && <span className="text-muted-foreground">后台</span>}
-                    {task.abortRequested && <span className="text-warning">正在停止</span>}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-          {executing && <p className="text-muted-foreground text-sm">pi-durable 正在执行…</p>}
-          {hasLiveTasks && !executing && (
-            <p className="text-muted-foreground text-sm">pi-durable 有待处理工作…</p>
-          )}
-          {!snapshot && (
-            <p className="text-muted-foreground mx-auto mt-24 max-w-md text-center text-sm">
-              选择一个 Conversation，或选择 Bot 后创建新的 Conversation。
-            </p>
-          )}
-        </div>
-
-        <form className="bg-background border-t p-4" onSubmit={(event) => void onSubmit(event)}>
-          <div className="mx-auto flex max-w-4xl items-end gap-2">
-            <Textarea
-              aria-label="发送消息"
-              className="max-h-40 min-h-12 resize-y"
-              disabled={!snapshot || busy || pendingSubmission !== null}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder="发送消息…（Enter 发送，Shift+Enter 换行）"
-              value={input}
-            />
+          </form>
+          {editBotId && (
             <Button
-              disabled={
-                !snapshot ||
-                busy ||
-                !input.trim() ||
-                (pendingSubmission !== null && pendingSubmission.conversationId !== conversationId)
-              }
-              type="submit"
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const bot = bots.find((item) => item.id === editBotId);
+                if (bot) void onArchiveBot(bot);
+              }}
             >
-              {pendingSubmission ? "重试" : "发送"}
+              归档智能体
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={chatDialogOpen} onOpenChange={setChatDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建聊天</DialogTitle>
+            <DialogDescription>选择智能体，开始新的对话。</DialogDescription>
+          </DialogHeader>
+          {error && (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          )}
+          <div className="max-h-60 space-y-2 overflow-y-auto">
+            {bots
+              .filter((bot) => !bot.archived)
+              .map((bot) => (
+                <Button
+                  key={bot.id}
+                  className="w-full justify-start"
+                  variant={selectedBotId === bot.id ? "secondary" : "outline"}
+                  onClick={() => setSelectedBotId(bot.id)}
+                >
+                  <SparklesIcon />
+                  {bot.name}
+                </Button>
+              ))}
+          </div>
+          <Input
+            aria-label="Conversation 工作目录覆盖"
+            placeholder="工作目录（可选）"
+            value={conversationCwd}
+            onChange={(event) => setConversationCwd(event.target.value)}
+          />
+          <Textarea
+            aria-label="新 Conversation 工作目标"
+            placeholder="工作目标（可选）"
+            value={newGoal}
+            onChange={(event) => setNewGoal(event.target.value)}
+          />
+          <Button disabled={busy || runnerUnavailable} onClick={() => void startChat()}>
+            {selectedBot ? `和${selectedBot.name}聊天` : "创建默认助手并开始"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setChatDialogOpen(false);
+              beginNewBot();
+              setBotDialogOpen(true);
+            }}
+          >
+            新建智能体
+          </Button>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open);
+          if (!open) setProviderKey("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>设置</DialogTitle>
+            <DialogDescription>DeepSeek 凭据与本机运行状态。</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm">
+            {providerConfigured ? "DeepSeek 密钥已配置" : "未检测到 DEEPSEEK_API_KEY"}
+          </p>
+          <Input
+            aria-label="DeepSeek API Key"
+            type="password"
+            autoComplete="off"
+            placeholder="输入新的 DeepSeek API Key"
+            value={providerKey}
+            onChange={(event) => setProviderKey(event.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button
+              disabled={busy || !providerKey.trim()}
+              onClick={() => void onSetProviderCredential(providerKey.trim())}
+            >
+              安全保存
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy || !providerConfigured}
+              onClick={() => void onSetProviderCredential(null)}
+            >
+              移除已保存密钥
             </Button>
           </div>
-        </form>
-      </section>
+          <p className="text-muted-foreground text-xs leading-5">
+            密钥保存在系统凭据库。未保存时从宿主环境变量 DEEPSEEK_API_KEY 读取。
+          </p>
+          <Separator />
+          <InfoRow label="本机状态" value={runnerUnavailable ? "连接失败" : "已连接"} />
+          <Button variant="outline" disabled={busy} onClick={() => void onRestartRunner()}>
+            重新连接
+          </Button>
+          <p className="text-muted-foreground text-xs">Node {runtimeVersion || "—"}</p>
+          {(error || credentialWarning) && (
+            <p role="alert" className="text-destructive text-sm">
+              {error || credentialWarning}
+            </p>
+          )}
+          {notice && (
+            <p role="status" className="text-muted-foreground text-sm">
+              {notice}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
 
+function InspectorSection({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex min-h-7 items-center justify-between">
+        <h3 className="text-muted-foreground text-xs font-medium">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="min-w-0 text-right break-words">{value}</span>
+    </div>
+  );
+}
+
+function formatDate(timestamp: number) {
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(timestamp);
+}
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Runner 操作失败";
+  return error instanceof Error ? error.message : "操作失败，请重试";
 }
