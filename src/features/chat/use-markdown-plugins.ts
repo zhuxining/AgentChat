@@ -1,11 +1,12 @@
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
 import { useEffect, useState } from "react";
 import type { DiagramPlugin, PluginConfig } from "streamdown";
 
+import { codePlugin } from "@/lib/code-plugin";
+
 const fencePattern = /^\s*```\s*mermaid\b/m;
 
-const basePlugins: PluginConfig = { code, cjk };
+const basePlugins: PluginConfig = { code: codePlugin, cjk };
 
 // Mermaid is by far the heaviest plugin, so it is loaded only once a transcript actually
 // contains a diagram; every other reply renders without paying for it.

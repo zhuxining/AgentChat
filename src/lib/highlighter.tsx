@@ -1,6 +1,12 @@
 import * as React from "react";
-import { createHighlighterCore, type GrammarState, type HighlighterCore } from "shiki/core";
+import {
+  createHighlighterCore,
+  type GrammarState,
+  type HighlighterCore,
+  type TokensResult,
+} from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import type { BundledLanguage, BundledTheme } from "streamdown";
 
 // Add the languages you need. Each one loads the first time it is used.
 const languages = {
@@ -32,6 +38,7 @@ const aliases: Record<string, keyof typeof languages> = {
 };
 
 let highlighter: Promise<HighlighterCore> | undefined;
+let resolved: HighlighterCore | null = null;
 
 function getHighlighter() {
   highlighter ??= createHighlighterCore({
@@ -39,9 +46,64 @@ function getHighlighter() {
     langs: [],
     // The JavaScript engine avoids shipping the WASM payload with the desktop bundle.
     engine: createJavaScriptRegexEngine({ forgiving: true }),
+  }).then((core) => {
+    resolved = core;
+    return core;
   });
 
   return highlighter;
+}
+
+/** Languages this app can highlight, including aliases. */
+export const supportedLanguages = [
+  ...Object.keys(languages),
+  ...Object.keys(aliases),
+] as BundledLanguage[];
+
+export const defaultThemes = ["github-light", "github-dark"] as [BundledTheme, BundledTheme];
+
+function toTokens(core: HighlighterCore, code: string, lang: string): TokensResult {
+  return core.codeToTokens(code, {
+    lang,
+    themes: { light: "github-light", dark: "github-dark" },
+    defaultColor: false,
+  });
+}
+
+/**
+ * Tokens for already-loaded grammars, or null while the grammar still loads. Used by
+ * Streamdown's code plugin, which asks synchronously before falling back to a callback.
+ */
+export function tokensNow(code: string, language: string): TokensResult | null {
+  const core = resolved;
+  const lang = getLanguage(language);
+
+  if (!core || !lang) {
+    return null;
+  }
+
+  if (lang !== "ansi" && !core.getLoadedLanguages().includes(lang)) {
+    return null;
+  }
+
+  return toTokens(core, code, lang);
+}
+
+/** Tokens once the grammar is ready, or null for a language that is not listed. */
+export async function loadTokens(code: string, language: string): Promise<TokensResult | null> {
+  const lang = getLanguage(language);
+
+  if (!lang) {
+    return null;
+  }
+
+  const core = await getHighlighter();
+
+  if (lang !== "ansi" && !core.getLoadedLanguages().includes(lang)) {
+    await core.loadLanguage(languages[lang]);
+  }
+
+  return toTokens(core, code, lang);
 }
 
 function getLanguage(language: string) {
