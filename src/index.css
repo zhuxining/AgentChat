@@ -68,6 +68,52 @@
       height: 0;
     }
   }
+
+  /* Interface motion: state changes transition, content eases in, continuous input
+     (dragging, streaming text) stays untouched. */
+  --ease-soft: cubic-bezier(0.23, 1, 0.32, 1);
+  --animate-fade-in: fade-in 150ms var(--ease-soft);
+  --animate-message-in: message-in 180ms var(--ease-soft);
+  --animate-message-in-end: message-in-end 180ms var(--ease-soft);
+  --animate-status-pulse: status-pulse 1.6s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes message-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes message-in-end {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes status-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
 }
 
 /* Flexoki color system — source of truth: docs/design.pen */
@@ -225,3 +271,15 @@
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* Respect the system setting: every transition and animation collapses to instant. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

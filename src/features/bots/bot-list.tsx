@@ -142,7 +142,7 @@ function BotListItem({
             <span
               role="img"
               aria-label="正在处理"
-              className="bg-primary size-2 shrink-0 rounded-full"
+              className="bg-primary animate-status-pulse size-2 shrink-0 rounded-full"
             />
           )}
         </span>

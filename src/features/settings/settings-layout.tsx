@@ -34,7 +34,7 @@ export function SettingsLayout() {
   }
 
   return (
-    <section aria-label="设置" className="flex h-full min-h-0 min-w-0 flex-1">
+    <section aria-label="设置" className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1">
       <aside
         aria-label="设置导航"
         className={cn(
@@ -93,7 +93,7 @@ export function SettingsLayout() {
           </h1>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div className="mx-auto max-w-2xl space-y-6">
+          <div key={active?.id ?? "index"} className="animate-fade-in mx-auto max-w-2xl space-y-6">
             {active ? (
               <Outlet />
             ) : (

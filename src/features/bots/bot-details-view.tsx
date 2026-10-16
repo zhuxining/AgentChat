@@ -69,7 +69,7 @@ export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean
   return (
     <div className="space-y-5">
       {showFeedback && feedback.error && (
-        <p role="alert" className="text-destructive text-sm">
+        <p role="alert" className="text-destructive animate-fade-in text-sm">
           {feedback.error}
         </p>
       )}

@@ -8,6 +8,7 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
+import { cn } from "cn";
 import { SparklesIcon } from "lucide-react";
 import { useEffect } from "react";
 import { usePanelRef } from "react-resizable-panels";
@@ -42,7 +43,7 @@ function WorkspaceShell() {
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { botSearch, setBotSearch, detailsOpen } = useWorkspaceUi();
+  const { botSearch, setBotSearch, detailsOpen, detailsAnimating } = useWorkspaceUi();
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
@@ -134,7 +135,10 @@ function WorkspaceShell() {
               minSize={260}
               maxSize={560}
               groupResizeBehavior="preserve-pixel-size"
-              className="overflow-hidden"
+              className={cn(
+                "overflow-hidden",
+                detailsAnimating && "transition-all duration-200 ease-soft",
+              )}
             >
               <BotDetailsPane />
             </ResizablePanel>
@@ -191,7 +195,10 @@ function BotsIndexPage() {
   return (
     <>
       {!isDesktop && (
-        <section aria-label="Bot 列表页" className="bg-sidebar flex h-full min-h-0 flex-1 flex-col">
+        <section
+          aria-label="Bot 列表页"
+          className="bg-sidebar animate-fade-in flex h-full min-h-0 flex-1 flex-col"
+        >
           <BotList
             bots={workspace.catalog.bots}
             selectedBotId={workspace.selection.selectedBotId}
@@ -208,7 +215,10 @@ function BotsIndexPage() {
         </section>
       )}
       {isDesktop && (
-        <section aria-label="选择 Bot" className="flex h-full min-h-0 min-w-0 flex-1">
+        <section
+          aria-label="选择 Bot"
+          className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1"
+        >
           <Empty className="min-h-64">
             <EmptyHeader>
               <EmptyMedia variant="icon">

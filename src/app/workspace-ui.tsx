@@ -4,7 +4,7 @@ type WorkspaceUi = {
   botSearch: string;
   setBotSearch: (value: string) => void;
   detailsOpen: boolean;
-  setDetailsOpen: (open: boolean) => void;
+  detailsAnimating: boolean;
   toggleDetails: () => void;
 };
 
@@ -15,15 +15,17 @@ const WorkspaceUiContext = createContext<WorkspaceUi | null>(null);
 export function WorkspaceUiProvider({ children }: { children: ReactNode }) {
   const [botSearch, setBotSearch] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(true);
+  // The panel only transitions for the programmatic toggle; dragging its handle stays
+  // immediate, so the flag is cleared once the collapse/expand has finished.
+  const [detailsAnimating, setDetailsAnimating] = useState(false);
+  function toggleDetails() {
+    setDetailsAnimating(true);
+    setDetailsOpen((open) => !open);
+    window.setTimeout(() => setDetailsAnimating(false), 260);
+  }
   return (
     <WorkspaceUiContext.Provider
-      value={{
-        botSearch,
-        setBotSearch,
-        detailsOpen,
-        setDetailsOpen,
-        toggleDetails: () => setDetailsOpen((open) => !open),
-      }}
+      value={{ botSearch, setBotSearch, detailsOpen, detailsAnimating, toggleDetails }}
     >
       {children}
     </WorkspaceUiContext.Provider>

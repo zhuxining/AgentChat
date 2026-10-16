@@ -58,6 +58,14 @@ export function ChatView({ botId }: { botId: string }) {
     id: selection.conversationId,
     snapshot: selection.snapshot,
   });
+  // Only the newest turn animates: replaying entrances for a loaded history would make the
+  // transcript ripple every time it opens.
+  const latestSegment = segments.at(-1);
+  const latestMessage = latestSegment?.snapshot.messages
+    .filter((message) => message.text && (message.role === "user" || message.role === "assistant"))
+    .at(-1);
+  const latestRowId =
+    latestSegment && latestMessage ? rowId(latestSegment.conversation.id, latestMessage.id) : null;
   const hasConversation = selection.conversationId !== null;
   const executionStatus = conversation.executing
     ? "执行中"
@@ -67,7 +75,10 @@ export function ChatView({ botId }: { botId: string }) {
   const model =
     selection.snapshot?.conversation.agent.model?.modelId ?? selection.activeBot?.model.modelId;
   return (
-    <section aria-label="聊天内容" className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+    <section
+      aria-label="聊天内容"
+      className="animate-fade-in flex h-full min-h-0 min-w-0 flex-1 flex-col"
+    >
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4">
         <Button
           aria-label="返回 Bot 列表"
@@ -118,7 +129,7 @@ export function ChatView({ botId }: { botId: string }) {
       {(feedback.error || connection.credentialWarning) && (
         <div
           role="alert"
-          className="text-destructive flex items-center justify-between gap-2 border-b px-5 py-3 text-sm"
+          className="text-destructive animate-fade-in flex items-center justify-between gap-2 border-b px-5 py-3 text-sm"
         >
           <span>{feedback.error || connection.credentialWarning}</span>
           {connection.runnerUnavailable && (
@@ -134,7 +145,7 @@ export function ChatView({ botId }: { botId: string }) {
         </div>
       )}
       {hasConversation && !connection.providerConfigured && (
-        <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-5 py-2 text-xs">
+        <div className="text-muted-foreground animate-fade-in flex items-center justify-between gap-2 border-b px-5 py-2 text-xs">
           <span>尚未检测到 DeepSeek 凭据。</span>
           <Button
             variant="ghost"
@@ -154,7 +165,7 @@ export function ChatView({ botId }: { botId: string }) {
               {segments.map((segment, index) => (
                 <Fragment key={segment.conversation.id}>
                   <MessageScrollerItem messageId={`conversation:${segment.conversation.id}`}>
-                    <Marker variant="separator">
+                    <Marker variant="separator" className="animate-fade-in">
                       <MarkerContent>
                         {index === 0
                           ? formatDate(segment.conversation.createdAt)
@@ -172,6 +183,13 @@ export function ChatView({ botId }: { botId: string }) {
                         key={rowId(segment.conversation.id, message.id)}
                         messageId={rowId(segment.conversation.id, message.id)}
                         scrollAnchor={message.role === "user"}
+                        className={
+                          rowId(segment.conversation.id, message.id) === latestRowId
+                            ? message.role === "user"
+                              ? "animate-message-in-end"
+                              : "animate-message-in"
+                            : undefined
+                        }
                       >
                         <Message align={message.role === "user" ? "end" : "start"}>
                           <MessageContent>
@@ -194,7 +212,7 @@ export function ChatView({ botId }: { botId: string }) {
               ))}
               {!hasConversation && (
                 <MessageScrollerItem messageId="empty">
-                  <Empty className="min-h-64">
+                  <Empty className="animate-fade-in min-h-64">
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
                         <SparklesIcon />
@@ -222,7 +240,7 @@ export function ChatView({ botId }: { botId: string }) {
               {hasConversation &&
                 segments.every((segment) => segment.snapshot.messages.length === 0) && (
                   <MessageScrollerItem messageId="empty-conversation">
-                    <Empty className="min-h-40">
+                    <Empty className="animate-fade-in min-h-40">
                       <EmptyHeader>
                         <EmptyTitle>开始这次对话</EmptyTitle>
                         <EmptyDescription>输入第一条消息，Bot 会接着往下做。</EmptyDescription>
@@ -232,7 +250,7 @@ export function ChatView({ botId }: { botId: string }) {
                 )}
               {messaging.pendingSubmission?.conversationId === selection.conversationId && (
                 <MessageScrollerItem messageId="status:pending">
-                  <Marker role="status">
+                  <Marker role="status" className="animate-fade-in">
                     <MarkerIcon>
                       <Spinner />
                     </MarkerIcon>
@@ -242,7 +260,7 @@ export function ChatView({ botId }: { botId: string }) {
               )}
               {messaging.currentAcceptedSubmissionId !== null && (
                 <MessageScrollerItem messageId="status:accepted">
-                  <Marker role="status">
+                  <Marker role="status" className="animate-fade-in">
                     <MarkerIcon>
                       <Spinner />
                     </MarkerIcon>
@@ -260,7 +278,7 @@ export function ChatView({ botId }: { botId: string }) {
                     key={`submission:${submission.id}`}
                     messageId={`submission:${submission.id}`}
                   >
-                    <Marker>
+                    <Marker className="animate-fade-in">
                       <MarkerContent className="flex-1">
                         消息 #{submission.id} 等待处理
                       </MarkerContent>
@@ -279,7 +297,7 @@ export function ChatView({ botId }: { botId: string }) {
                 ))}
               {conversation.hasLiveTasks && (
                 <MessageScrollerItem messageId="status:running">
-                  <Marker role="status">
+                  <Marker role="status" className="animate-fade-in">
                     <MarkerIcon>
                       <Spinner />
                     </MarkerIcon>
