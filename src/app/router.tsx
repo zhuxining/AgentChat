@@ -90,6 +90,7 @@ function WorkspaceShell() {
               defaultSize={260}
               minSize={200}
               maxSize={420}
+              groupResizeBehavior="preserve-pixel-size"
               className="overflow-hidden"
             >
               <aside
@@ -99,7 +100,7 @@ function WorkspaceShell() {
                 {botList}
               </aside>
             </ResizablePanel>
-            <ResizableHandle withHandle />
+            <ResizableHandle className="after:w-2" />
           </>
         )}
         <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col overflow-hidden">
@@ -107,12 +108,13 @@ function WorkspaceShell() {
         </ResizablePanel>
         {chatMatch && !newBotMatch && detailsOpen && (
           <>
-            <ResizableHandle withHandle />
+            <ResizableHandle className="after:w-2" />
             <ResizablePanel
               id="details"
               defaultSize={340}
               minSize={260}
               maxSize={560}
+              groupResizeBehavior="preserve-pixel-size"
               className="overflow-hidden"
             >
               <BotDetailsPane />
