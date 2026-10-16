@@ -123,6 +123,11 @@ export async function openRunner({ dataDir, models: providedModels }: RunnerOpti
           }
         : null,
       configuration: configurationStatus(),
+      // Provider and model options let the UI offer direct choices instead of free text.
+      providers: provider.models.getProviders().map((item) => ({
+        name: item.id,
+        models: provider.models.getModels(item.id).map((model) => model.id),
+      })),
       apiKeyConfigured: provider.isConfigured(),
       runtimeVersion: process.version,
     };

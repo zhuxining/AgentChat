@@ -239,6 +239,21 @@ describe("Runner typed operations", () => {
     }
   });
 
+  it("offers provider and model choices so the UI can use direct selection", async () => {
+    const { runner } = await fixture();
+    try {
+      const initialized = await runner.initialize();
+      expect(initialized.providers).toContainEqual(
+        expect.objectContaining({
+          name: "deepseek",
+          models: expect.arrayContaining(["deepseek-chat", "deepseek-reasoner"]),
+        }),
+      );
+    } finally {
+      await runner.close();
+    }
+  });
+
   it("blocks a broken or missing Bot config without destroying accepted execution state", async () => {
     const { runner, dataDir } = await fixture();
     try {

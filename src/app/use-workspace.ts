@@ -8,6 +8,7 @@ import type {
   ConversationSnapshot,
   ConversationSummary,
   InitializeResult,
+  ProviderOption,
   RunnerCapabilities,
   runnerClient,
 } from "@/app/runner-client";
@@ -28,6 +29,7 @@ export function useWorkspace(client: RunnerClient) {
     extensions: [],
     tools: [],
   });
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [selectedBotId, setSelectedBotId] = useState("");
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [storedSnapshot, setStoredSnapshot] = useState<ConversationSnapshot | null>(null);
@@ -59,6 +61,7 @@ export function useWorkspace(client: RunnerClient) {
     setBots(initial.bots);
     setConversations(initial.conversations);
     setCapabilities(initial.capabilities);
+    setProviders(initial.providers);
     setProviderConfigured(initial.apiKeyConfigured);
     setRuntimeVersion(initial.runtimeVersion);
     setCredentialWarning(initial.credentialWarning ?? "");
@@ -409,7 +412,7 @@ export function useWorkspace(client: RunnerClient) {
   }
 
   return {
-    catalog: { bots, conversations, capabilities, botDefaults, configuration },
+    catalog: { bots, conversations, capabilities, botDefaults, configuration, providers },
     selection: {
       conversationId,
       selectedBotId,

@@ -78,12 +78,14 @@ export type ConfigurationStatus = {
   ready: boolean;
 };
 export type ConfigurationFile = { path: string; version: string; content: string };
+export type ProviderOption = { name: string; models: string[] };
 export type InitializeResult = {
   bots: Bot[];
   botDefaults: BotDefaults | null;
   configuration: ConfigurationStatus;
   conversations: ConversationSummary[];
   capabilities: RunnerCapabilities;
+  providers: ProviderOption[];
   apiKeyConfigured: boolean;
   credentialWarning?: string;
   runtimeVersion: string;
