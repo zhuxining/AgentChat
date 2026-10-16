@@ -11,8 +11,8 @@ import {
 import { Fragment } from "react";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Empty,
   EmptyContent,
@@ -188,14 +188,17 @@ export function ChatView({ botId }: { botId: string }) {
                                     ? "工具"
                                     : "系统"}
                             </MessageHeader>
-                            <Card size="sm" className="w-fit max-w-[90%]">
-                              <CardContent className="text-sm leading-7 break-words whitespace-pre-wrap">
+                            <Bubble
+                              align={message.role === "user" ? "end" : "start"}
+                              variant={message.role === "user" ? "default" : "muted"}
+                            >
+                              <BubbleContent className="whitespace-pre-wrap">
                                 {message.text}
                                 {message.truncated && (
                                   <span className="text-muted-foreground">（内容已截断）</span>
                                 )}
-                              </CardContent>
-                            </Card>
+                              </BubbleContent>
+                            </Bubble>
                           </MessageContent>
                         </Message>
                       </MessageScrollerItem>

@@ -50,7 +50,7 @@ Bot 详情是唯一的 Bot 编辑入口，没有独立编辑页：服务商、�
 
 一个 Bot 可以拥有多个库 Conversation。界面按时间把它们拼接为一条消息流，边界以轻量分隔标注，用户不需要切换底层 Conversation 才能阅读历史；选中 Bot 默认停在它最新的一个。工作目标属于单个库 Conversation，其保存与完成状态由用户确认。
 
-消息区使用 `MessageScroller` 与 `Message` 组件，不自建滚动行为：每一行（消息、会话分隔、排队与执行状态）都是 `MessageScrollerItem`，用户消息标记为锚点；`autoScroll` 只在读者位于实时边缘时跟随流式输出，读者一旦向上滚动就保持原位；打开对话定位到最后一段锚点而不是绝对底部；新会话在输入时先把它带到视口上方再让回答流入下方。行 id 由库 Conversation 与消息 id 组合而成，因为消息 id 只在单个 Conversation 内唯一；“跳到最新消息”控件由组件提供。
+消息区使用 `MessageScroller` 与 `Message` 组件，不自建滚动行为：每一行（消息、会话分隔、排队与执行状态）都是 `MessageScrollerItem`，消息表面用 `Bubble`（用户 primary、助手 muted，宽度随内容且不超 80%），用户消息标记为锚点；`autoScroll` 只在读者位于实时边缘时跟随流式输出，读者一旦向上滚动就保持原位；打开对话定位到最后一段锚点而不是绝对底部；新会话在输入时先把它带到视口上方再让回答流入下方。行 id 由库 Conversation 与消息 id 组合而成，因为消息 id 只在单个 Conversation 内唯一；“跳到最新消息”控件由组件提供。
 
 会话分隔、排队提示与执行中状态等非消息行使用 `Marker`（分隔用 `separator` 变体，进行中状态带 `role="status"` 与 Spinner）；空状态统一使用 `Empty` 的 header／media／content 组合，不手写居中布局。
 
