@@ -4,6 +4,12 @@
 @import "@fontsource-variable/geist";
 @import "tw-shimmer";
 @import "@fontsource-variable/inter";
+@import "streamdown/styles.css";
+
+/* Streamdown ships its own components outside the app source tree, so their utility
+   classes have to be scanned explicitly. */
+@source "../node_modules/streamdown/dist";
+@source "../node_modules/@streamdown";
 
 @custom-variant dark (&:is(.dark *));
 

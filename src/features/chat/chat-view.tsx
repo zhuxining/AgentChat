@@ -8,6 +8,7 @@ import {
   SquareIcon,
 } from "lucide-react";
 import { Fragment } from "react";
+import { Streamdown } from "streamdown";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
 import { useWorkspaceUi } from "@/app/workspace-ui";
@@ -40,6 +41,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
+import { useMarkdownPlugins } from "@/features/chat/use-markdown-plugins";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
 // Message ids are only unique inside a library Conversation, so rows are addressed by
@@ -58,6 +60,9 @@ export function ChatView({ botId }: { botId: string }) {
     id: selection.conversationId,
     snapshot: selection.snapshot,
   });
+  const markdownPlugins = useMarkdownPlugins(
+    segments.flatMap((segment) => segment.snapshot.messages.map((message) => message.text)),
+  );
   // Only the newest turn animates: replaying entrances for a loaded history would make the
   // transcript ripple every time it opens.
   const latestSegment = segments.at(-1);
@@ -197,8 +202,27 @@ export function ChatView({ botId }: { botId: string }) {
                               align={message.role === "user" ? "end" : "start"}
                               variant={message.role === "user" ? "default" : "muted"}
                             >
-                              <BubbleContent className="whitespace-pre-wrap">
-                                {message.text}
+                              <BubbleContent>
+                                {message.role === "assistant" ? (
+                                  <Streamdown
+                                    mode={
+                                      rowId(segment.conversation.id, message.id) === latestRowId &&
+                                      conversation.hasLiveTasks
+                                        ? "streaming"
+                                        : "static"
+                                    }
+                                    isAnimating={
+                                      rowId(segment.conversation.id, message.id) === latestRowId &&
+                                      conversation.hasLiveTasks
+                                    }
+                                    animated={false}
+                                    plugins={markdownPlugins}
+                                  >
+                                    {message.text}
+                                  </Streamdown>
+                                ) : (
+                                  <span className="whitespace-pre-wrap">{message.text}</span>
+                                )}
                                 {message.truncated && (
                                   <span className="text-muted-foreground">（内容已截断）</span>
                                 )}
