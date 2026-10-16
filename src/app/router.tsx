@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { SparklesIcon } from "lucide-react";
 import { useEffect } from "react";
+import { usePanelRef } from "react-resizable-panels";
 
 import { useWorkspaceContext } from "@/app/workspace-provider";
 import { useWorkspaceUi } from "@/app/workspace-ui";
@@ -45,12 +46,27 @@ function WorkspaceShell() {
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
+  const isChatRoute = Boolean(chatMatch) && !newBotMatch;
+  const detailsPanelRef = usePanelRef();
   const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
     conversationId: workspace.selection.conversationId,
     latestMessage:
       workspace.selection.snapshot?.messages.filter((message) => message.text).at(-1)?.text ?? "",
     executing: workspace.conversation.executing,
   });
+  // The details pane collapses to zero instead of unmounting: removing the panel would
+  // redistribute its width across the remaining panels and shift the Bot list.
+  useEffect(() => {
+    const panel = detailsPanelRef.current;
+    if (!panel) return;
+    try {
+      if (detailsOpen) panel.expand();
+      else panel.collapse();
+    } catch {
+      // The group has no measurable layout yet (first paint without a layout engine);
+      // the next toggle still works because the state stays the source of truth.
+    }
+  }, [detailsOpen, isChatRoute, detailsPanelRef]);
   if (workspace.connection.loading) {
     return (
       <main className="text-muted-foreground grid h-full place-items-center text-sm">
@@ -106,11 +122,14 @@ function WorkspaceShell() {
         <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col overflow-hidden">
           <Outlet />
         </ResizablePanel>
-        {chatMatch && !newBotMatch && detailsOpen && (
+        {isChatRoute && (
           <>
             <ResizableHandle className="after:w-2" />
             <ResizablePanel
               id="details"
+              panelRef={detailsPanelRef}
+              collapsible
+              collapsedSize={0}
               defaultSize={340}
               minSize={260}
               maxSize={560}
