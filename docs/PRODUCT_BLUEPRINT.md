@@ -8,7 +8,7 @@
 
 AgentChat 是支持持续对话与工作管理的本机 Agent 工作台。用户选择具名 Bot，提交输入、查看执行过程并跟进工作目标。桌面 UI 是控制端，独立后台 Runner 管理配置、工作区与执行状态；关闭或退出 UI 不停止工作。
 
-产品 Conversation 是连续聊天窗口，可以在同一消息流中容纳多个会话。它不默认等同于 pi-durable Conversation，也不决定 Runner 的执行结构。执行术语与产品术语见[术语表](../GLOSSARY.md)。
+产品 Conversation 是连续聊天窗口，可以在同一消息流中容纳多个会话。它不默认等同于 pi-durable Conversation，也不决定 Runner 的执行结构。执行术语与产品术语见[术语表](../GLOSSARY.md)，界面结构、自适应规则与状态归属见 [UI 结构](architecture/03-ui-structure.md)。
 
 未来桌面与 iOS/Android 客户端通过独立 Relay 跨网络同步。手机不运行 Harness；多端通信不改变 Runner 对执行状态的权威归属。
 

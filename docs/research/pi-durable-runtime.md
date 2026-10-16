@@ -98,4 +98,4 @@ AgentChat 首发建议使用 createRegistry().install(...)，由 Rust 负责子�
 - [S1：官方 pi-durable README](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md)，对应本地 node_modules/@earendil-works/pi-durable/README.md 1.2.0。
 - [S2：官方 pi-durable spec](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md)，通过 Context7 查询 Harness、关闭、Document 与 Tx 段落；实际类型以本地版本复核。
 - [S3：Chord README](https://github.com/earendil-works/pi/blob/main/packages/chord/README.md)、[guide Durable](https://github.com/earendil-works/pi/blob/main/packages/chord/docs/guide.md#durable)、[spec](https://github.com/earendil-works/pi/blob/main/packages/chord/docs/spec.md)，对应本地 chord 1.2.0 文档。
-- S4：安装包一手类型/实现：pi-durable/package.json、dist/harness/types.d.ts、dist/types.d.ts、dist/harness/scheduler.d.ts、dist/storage/sqlite/node.js；可在[已安装 README](../../node_modules/@earendil-works/pi-durable/README.md)旁核对。
+- S4：安装包一手类型/实现：pi-durable/package.json、dist/harness/types.d.ts、dist/types.d.ts、dist/harness/scheduler.d.ts、dist/storage/sqlite/node.js；可在[已安装 README](../../runner/node_modules/@earendil-works/pi-durable/README.md)旁核对。

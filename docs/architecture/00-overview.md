@@ -35,9 +35,11 @@ flowchart LR
 
 ```text
 src/
-├─ App.tsx                     # 聊天入口装配
-├─ app/runner-client.ts        # 集中类型化 Tauri IPC
-├─ features/chat/              # 工作台、Bot/会话、设置与配置编辑
+├─ App.tsx                     # 应用装配：Provider、路由与 IPC 客户端
+├─ app/                        # 路由与布局组合、工作区状态、类型化 Tauri IPC
+├─ features/bots/              # Bot 列表、详情、新建与配置表单
+├─ features/chat/              # 连续对话与会话时间线
+├─ features/settings/          # 设置分类与配置编辑
 └─ components/ui/              # 共享基础组件
 src-tauri/src/
 ├─ lib.rs                      # UI/后台入口分流、Tauri 装配
@@ -78,11 +80,12 @@ Relay 不运行 Harness、不读取工作区或执行 Storage；手机不取得 
 
 本地测试分布在 `tests/`、`runner/tests/` 和 Rust 模块内，覆盖 UI、配置、Harness 操作和宿主协议。macOS 已验证真实后台二进制的多客户端关联、单实例、配置重载、过期保存拒绝、显式停止和重开后的配置快照；桌面界面已验证配置读取、停止后台后 UI 保留，以及 UI 进程退出后后台存活和重新连接。未使用真实用户数据或调用真实模型。
 
-前端与 Node 构建、Rust 构建可执行；Tauri 打包版本不匹配已修复（crate 与 `@tauri-apps/*` 包统一在同一 major.minor），macOS arm64 release `.app` 已完成构建并在临时目录通过打包产物冒烟（随包 Node 启动后台、创建 Bot 与会话、宿主读配置、UI 退出后后台存活、重连与显式停止）。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。Unix 实现不代表 Linux/所有 Unix 平台均已完成打包验收，Windows IPC 明确未实现。
+前端与 Node 构建、Rust 构建可执行；Tauri 打包版本不匹配已修复（crate 与 `@tauri-apps/*` 包统一在同一 major.minor），macOS arm64 release `.app` 已完成构建并在临时目录通过打包产物冒烟（随包 Node 启动后台、创建 Bot 与会话、宿主读配置、UI 退出后后台存活、重连与显式停止）。桌面界面结构（Bot 列表、连续消息流、详情与配置编辑、设置分类、三栏／两栏切换）的验证与缺口见 [UI 结构](03-ui-structure.md)。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。Unix 实现不代表 Linux/所有 Unix 平台均已完成打包验收，Windows IPC 明确未实现。
 
 多端、Relay、共享契约生成和移动端不列为已实现。库 API 为实验性，具体行为以锁定版本类型和源码为准。
 
 - [产品蓝图](../PRODUCT_BLUEPRINT.md)
+- [UI 结构](03-ui-structure.md)
 - [pi-durable 应用集成](01-pi-durable.md)
 - [多端与 Relay](02-multi-device.md)
 - [runtime 研究记录](../research/pi-durable-runtime.md)：历史研究依据，不覆盖当前宿主设计

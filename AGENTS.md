@@ -9,18 +9,25 @@
 - 保持改动聚焦，修复根因，不顺手重构无关代码，不覆盖用户已有改动。
 - 优先标准库和仓库已采用的依赖、组件与模式。新增依赖必须有明确消费者，并说明其替代的职责、维护状态、安全影响和原生构建成本。
 - 不为未来需求预建通用层、空模块、无消费者的 trait 或抽象；出现稳定的重复边界后再提取。
-- 当前项目仍处于早期阶段：前端主要是欢迎页和共享 UI，Rust 侧尚无自定义 Tauri Command，不能把已安装依赖或预留目录描述成已实现功能。
+- 当前前端已采用路由化页面结构（Bot 列表、连续对话、详情、配置编辑、应用设置），Rust 侧已有自定义 Tauri Command。不能把已安装依赖、预留目录或规划中的能力描述成已实现功能。
 
 ## 项目结构与边界
 
 ```text
 src/                         React 前端
+  app/                       路由、应用装配、Runner 客户端与工作区状态
+  features/bots/             Bot 列表、详情、新建与配置表单
+  features/chat/             连续对话视图与会话时间线
+  features/settings/         设置分类与配置编辑
   components/ui/             共享 UI 基础组件
   hooks/                     通用 React Hooks
   lib/                       前端通用工具
 src-tauri/                   Rust/Tauri 宿主
   src/lib.rs                 Builder、插件和应用启动组合
-  src/commands/              自定义 IPC Command（当前为空）
+  src/commands/              自定义 IPC Command
+  src/runner.rs              Node Runner 子进程请求转发
+  src/host.rs                独立 Runner 宿主、连接与实例锁
+  src/credentials.rs         系统凭据库访问
   capabilities/              窗口、平台与插件权限
   tauri.conf.json            应用、窗口、安全与打包配置
 public/                      原样复制的静态资源
@@ -59,7 +66,7 @@ vpr tauri build     # 构建并打包桌面应用
 - Effect 只用于与外部系统同步；订阅、定时器和 Tauri 事件必须返回清理函数，并处理异步订阅在卸载前尚未完成的情况。
 - React Compiler 已启用。不要仅凭习惯添加 `memo`、`useMemo` 或 `useCallback`；仅在身份稳定具有语义要求或性能测量证明必要时使用。
 - 服务端数据使用 TanStack Query 管理缓存和异步生命周期；跨组件客户端状态仅在确有共享需求时使用 Zustand，不重复维护同一事实源。
-- 当前尚未接入 TanStack Router。真正启用路由后再建立路由目录和生成文件规则，不为未使用依赖编造结构。
+- 路由使用 TanStack Router 的代码式路由，集中定义在 `src/app/router.tsx`，使用内存历史，不使用文件式生成路由。响应式布局决定哪些栏位常驻，页面只负责自身内容与导航。
 - 使用不可变更新、提前返回和可辨识联合类型表达互斥状态；异步界面明确区分 idle、loading、success、empty 和 error。
 
 ## UI 与样式
@@ -81,7 +88,7 @@ vpr tauri build     # 构建并打包桌面应用
 
 ## IPC、事件与状态同步
 
-当前仓库没有自定义 Command、`invoke_handler` 或前端 Tauri API 封装。新增 IPC 时必须同时完成：
+自定义 Command 在 `src-tauri/src/lib.rs` 的 `invoke_handler` 中注册，前端统一封装在 `src/app/runner-client.ts`，业务组件不直接调用 `invoke`。新增或修改 IPC 时必须同时完成：
 
 1. 在 `src-tauri/src/commands/` 中实现并测试 Command；
 2. 在 Builder 的单个 `tauri::generate_handler![...]` 中注册；
@@ -113,11 +120,11 @@ vpr tauri build     # 构建并打包桌面应用
 
 ## 测试与验证
 
-- 前端测试放在 `tests/<area>/<name>.test.ts`，以用户可观察行为和回归为中心，不镜像实现细节。当前 Vitest 默认为 Node 环境；需要 DOM 时先显式配置测试环境和测试工具。
+- 前端测试放在 `tests/<area>/<name>.test.ts`，以用户可观察行为和回归为中心，不镜像实现细节。`vite.config.ts` 已配置 happy-dom 与 @testing-library/react；组件测试直接使用现有工具，不另建测试框架。
 - Rust 单元测试放在对应模块内；跨模块与 IPC 契约测试放在 `src-tauri/tests/`。文件系统测试使用临时目录，不依赖用户真实目录、网络或执行顺序。
 - Bug 修复先添加能复现问题的最小失败测试，再修复根因。重点覆盖输入校验、错误映射、取消、路径安全、权限拒绝和持久化迁移。
 - 对纯函数、业务逻辑和 Command 内核优先做自动化测试；窗口、托盘、快捷键、通知和系统集成需要在支持的平台做桌面冒烟测试。不得只在浏览器中验证 Tauri 功能。
-- 当前仓库没有 CI 和既有测试，不得声称 CI 或测试已通过。新增 CI 时，本地和 CI 的检查命令必须一致，并按目标平台安装 Tauri 系统依赖。
+- 仓库当前已有一组 UI 测试，但仍无 CI。不得声称 CI 已通过；本地验证要如实报告命令、范围与未覆盖项。新增 CI 时，本地和 CI 的检查命令必须一致，并按目标平台安装 Tauri 系统依赖。
 
 按改动范围执行最小充分验证：
 

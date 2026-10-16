@@ -30,11 +30,11 @@ Tauri 的版本检查要求 Rust crate 与对应的 `@tauri-apps/*` 包处于同
 
 - 在设置中保存 DeepSeek API Key；密钥进入系统凭据库，不写入 JSON 或聊天数据。Linux 需要可用的 Secret Service。
 - 创建 Bot 时，将 Runner 默认模型、指令与能力选择写入该 Bot 的配置，并分配稳定工作区。当前模型入口为 DeepSeek Chat / Reasoner，默认编码工具为 `bash`、`edit`、`read`、`write`。
-- 从 Bot 创建执行会话；既有执行保存配置快照，空闲时通过“应用最新智能体设置”显式更新。
+- 从 Bot 开始新对话；既有执行保存配置快照，空闲时通过“应用最新 Bot 设置”显式更新。
 - 设置中的“停止后台 Runner”调用 Harness close 并收尾，保留未完成工作的恢复状态。取消工作或撤回输入是独立操作。
 - 使用“重新启动并连接”停止并重新打开后台；停止后该按钮显示“启动并连接”。退出 UI 后如需停止后台，可重新打开 UI 进入设置操作。
 
-产品聊天窗口是持续对话入口，可以容纳多个会话；它与库 `Conversation` 的关系不预设为一一对应。当前本地 UI 保留执行会话的创建、选择和状态展示，连续窗口的进一步产品交互按后续设计落地。
+产品聊天窗口是持续对话入口，可以容纳多个库 Conversation：界面把它们按时间拼接为一条消息流，边界以轻量分隔标注，选中 Bot 停留在最新的一个。界面结构、自适应规则与状态归属见 [UI 结构](docs/architecture/03-ui-structure.md)。
 
 ## 配置与本机数据
 
@@ -74,14 +74,14 @@ UI 保存携带内容版本，文件被外部编辑后拒绝过期覆盖；Runne
 
 ## 源码与验证边界
 
-- `src/features/chat/`：聊天工作台、Bot 编辑、设置与配置编辑；`src/app/runner-client.ts` 集中适配 Tauri IPC。
+- `src/app/`：路由、应用装配与 `runner-client.ts` 集中适配 Tauri IPC；`src/features/bots/`、`src/features/chat/`、`src/features/settings/` 分别承载 Bot、连续对话与应用设置。
 - `src-tauri/src/host.rs`：独立原生后台宿主、本机 IPC 与凭据入口；`runner.rs` 管理其 Node 子进程和私有 JSONL 通信。
 - `runner/src/config/`：配置文件、校验、版本冲突、有效值与重载。
 - `runner/src/harness/`：models、Registry、settings、ExecutionEnv、Storage 装配，类型化操作和状态视图。
 - `runner/src/communication/`：外部请求校验、分发与私有 stdio 传输。
 
-UI 测试位于 `tests/`，Runner 测试位于 `runner/tests/`，Rust 模块内有协议和宿主测试。macOS 已使用临时数据目录验证独立后台、多客户端关联、配置读写与重载、停止、UI 进程退出后后台存活和重新连接；Harness 单元集成测试验证了已接纳工作的关闭/重开恢复。本轮未调用真实模型，工具中断的跨进程恢复仍待验证。
+UI 测试位于 `tests/ui/`，Runner 测试位于 `runner/tests/`，Rust 模块内有协议和宿主测试。macOS 已使用临时数据目录验证独立后台、多客户端关联、配置读写与重载、停止、UI 进程退出后后台存活和重新连接；Harness 单元集成测试验证了已接纳工作的关闭/重开恢复。本轮未调用真实模型，工具中断的跨进程恢复仍待验证。
 
 前端/Node 与 Rust 构建通过；Tauri 打包的 JS/Rust 版本不匹配已修复（两侧统一在同一 major.minor），release `.app`（115.8 MiB）已在 macOS arm64 构建，并在临时目录完成打包产物冒烟：随包 Node 与 Runner 入口启动后台、创建 Bot 与会话、通过宿主读取配置、退出 UI 后后台存活、重连与显式停止。本轮未调用真实模型；手机、Device Core 与 Relay 尚未实现。
 
-设计入口：[产品蓝图](docs/PRODUCT_BLUEPRINT.md)、[架构总览](docs/architecture/00-overview.md)、[多端规划](docs/architecture/02-multi-device.md)、[术语表](GLOSSARY.md)。
+设计入口：[产品蓝图](docs/PRODUCT_BLUEPRINT.md)、[架构总览](docs/architecture/00-overview.md)、[UI 结构](docs/architecture/03-ui-structure.md)、[多端规划](docs/architecture/02-multi-device.md)、[术语表](GLOSSARY.md)。

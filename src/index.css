@@ -70,7 +70,7 @@
   }
 }
 
-/* Flexoki color system — source of truth: docs/ui/desktop-ui.pen */
+/* Flexoki color system — source of truth: docs/design.pen */
 :root {
   --paper: #fffcf0;
   --flexoki-bg: #f2f0e5;
