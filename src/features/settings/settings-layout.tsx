@@ -45,7 +45,7 @@ export function SettingsLayout() {
         <header
           data-window-titlebar
           data-window-titlebar-leading
-          className="flex h-16 shrink-0 items-center px-4"
+          className="flex h-14 shrink-0 items-center px-4"
         >
           <span className="font-semibold" data-window-drag-region>
             设置
@@ -84,7 +84,7 @@ export function SettingsLayout() {
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !active && "hidden md:flex")}>
         <header
           data-window-titlebar
-          className="flex h-16 shrink-0 items-center gap-2 border-b px-4"
+          className="flex h-14 shrink-0 items-center gap-2 border-b px-4"
         >
           <Button
             aria-label="返回设置分类"

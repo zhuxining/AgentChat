@@ -46,7 +46,7 @@ export function BotList({
       <header
         data-window-titlebar
         data-window-titlebar-leading
-        className="flex h-16 shrink-0 items-center justify-end gap-1 px-4"
+        className="flex h-14 shrink-0 items-center justify-end gap-1 px-4"
       >
         {onToggleSidebar && (
           <Button

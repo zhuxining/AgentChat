@@ -1,5 +1,4 @@
 import { useNavigate } from "@tanstack/react-router";
-import { cn } from "cn";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -87,10 +86,8 @@ export function ChatView({ botId }: { botId: string }) {
     >
       <header
         data-window-titlebar
-        className={cn(
-          "flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4",
-          !botListOpen && "md:pr-14",
-        )}
+        data-window-titlebar-leading={!botListOpen || undefined}
+        className="flex h-14 shrink-0 items-center gap-2 px-3 md:px-4"
       >
         <Button
           aria-label="返回 Bot 列表"

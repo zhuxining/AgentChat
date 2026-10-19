@@ -37,8 +37,8 @@ import { RunnerSettings } from "@/features/settings/runner-settings";
 import { SettingsLayout } from "@/features/settings/settings-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
-// The collapsed Bot rail stays visible as a narrow gutter, matching the reference layout.
-const botListCollapsedSize = 52;
+// A fully collapsed Bot list gives the chat area the whole remaining width.
+const botListCollapsedSize = 0;
 
 // Desktop is a resizable three-pane workspace: the Bot list and the details pane are
 // panels the reader can drag or push away. Below that width the same views become pages.
@@ -84,13 +84,13 @@ function WorkspaceShell() {
     const panel = detailsPanelRef.current;
     if (!panel) return;
     try {
-      if (detailsOpen) panel.expand();
+      if (detailsOpen && isChatRoute) panel.expand();
       else panel.collapse();
     } catch {
       // The group has no measurable layout yet (first paint without a layout engine);
       // the next toggle still works because the state stays the source of truth.
     }
-  }, [detailsOpen, isChatRoute, detailsPanelRef]);
+  }, [detailsOpen, isChatRoute, detailsPanelRef, settingsMatch]);
 
   if (workspace.connection.loading) {
     return (
@@ -123,20 +123,22 @@ function WorkspaceShell() {
     />
   );
   return (
-    <main className="bg-background text-foreground relative flex h-full min-h-0 overflow-hidden">
+    <main
+      data-bot-list-closed={!settingsMatch && !botListOpen ? "true" : undefined}
+      className="bg-background text-foreground relative flex h-full min-h-0 overflow-hidden"
+    >
       {!settingsMatch && !botListOpen && (
-        <div className="pointer-events-none absolute top-4 right-4 z-30">
-          <Button
-            aria-label="展开 Bot 侧栏"
-            title="展开 Bot 侧栏"
-            variant="ghost"
-            size="icon-sm"
-            className="pointer-events-auto"
-            onClick={toggleBotList}
-          >
-            <PanelLeftIcon />
-          </Button>
-        </div>
+        <Button
+          data-bot-list-reopen
+          aria-label="展开 Bot 侧栏"
+          title="展开 Bot 侧栏"
+          variant="ghost"
+          size="icon-sm"
+          aria-expanded={botListOpen}
+          onClick={toggleBotList}
+        >
+          <PanelLeftIcon />
+        </Button>
       )}
       <ResizablePanelGroup>
         {!settingsMatch && (
@@ -167,7 +169,7 @@ function WorkspaceShell() {
         <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col overflow-hidden">
           <Outlet />
         </ResizablePanel>
-        {isChatRoute && (
+        {!settingsMatch && (
           <>
             <ResizableHandle className="after:w-2" />
             <ResizablePanel
@@ -184,7 +186,7 @@ function WorkspaceShell() {
                 detailsAnimating && "transition-all duration-200 ease-soft",
               )}
             >
-              <BotDetailsPane />
+              {isChatRoute && <BotDetailsPane />}
             </ResizablePanel>
           </>
         )}

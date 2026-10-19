@@ -270,6 +270,17 @@ html[data-platform="macos"] [data-window-titlebar-leading] {
   }
 }
 
+[data-bot-list-reopen] {
+  position: absolute;
+  z-index: 30;
+  top: 12px;
+  inset-inline-start: var(--window-titlebar-leading-inset, 0px);
+}
+
+main[data-bot-list-closed] [data-window-titlebar] {
+  padding-inline-start: calc(var(--window-titlebar-leading-inset, 0px) + 40px);
+}
+
 [data-window-drag-region] {
   user-select: none;
   -webkit-user-select: none;
