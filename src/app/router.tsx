@@ -24,6 +24,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { selectLatestConversation } from "@/features/bots/bot-conversations";
 import { BotDetailsPage } from "@/features/bots/bot-details-page";
 import { BotDetailsPane } from "@/features/bots/bot-details-pane";
 import { BotList } from "@/features/bots/bot-list";
@@ -47,9 +48,7 @@ function WorkspaceShell() {
   const { data: catalog, isPending: loading } = useRunnerCatalog();
   const selectedBotId = useRouteBotId();
   const conversationId =
-    catalog?.conversations
-      .filter((item) => item.botId === selectedBotId)
-      .sort((left, right) => right.createdAt - left.createdAt || right.id - left.id)[0]?.id ?? null;
+    selectLatestConversation(catalog?.conversations ?? [], selectedBotId ?? "")?.id ?? null;
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   const isDesktop = useMediaQuery("(min-width: 768px)");
