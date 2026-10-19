@@ -1,3 +1,6 @@
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
+
+import { createNativeStdio } from "./communication/native.js";
 import { serveStdio } from "./communication/stdio.js";
 import { openRunner } from "./harness/open.js";
 
@@ -7,4 +10,13 @@ if (!dataDir) {
   process.stderr.write("Runner requires --data-dir\n");
   process.exit(2);
 }
-serveStdio(await openRunner({ dataDir }));
+registerBunOAuthFlows();
+const transport = createNativeStdio();
+const useNative = process.argv.includes("--native-rpc");
+serveStdio(
+  await openRunner({
+    dataDir,
+    ...(useNative ? { native: transport.adapter, migrateCredentials: true } : {}),
+  }),
+  transport,
+);

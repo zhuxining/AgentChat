@@ -11,7 +11,7 @@ const context = BACKGROUND_CONTEXT;
 export function createViews(
   harness: Harness,
   resolver: ReturnType<typeof createAgentResolver>,
-  isConfigured: () => boolean,
+  isConfigured: (providerId: string | undefined) => Promise<boolean> | boolean,
 ) {
   async function configurationErrors(conversation: { id: Parameters<Harness["conversation"]>[0] }) {
     const agent = await harness.snapshot(AgentDoc, conversation.id, context);
@@ -67,7 +67,7 @@ export function createViews(
         activeTasks,
         submissions,
         configurationErrors: missing,
-        apiKeyConfigured: isConfigured(),
+        apiKeyConfigured: await isConfigured(agent.model?.provider),
       };
     } finally {
       state.dispose();

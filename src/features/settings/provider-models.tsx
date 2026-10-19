@@ -1,0 +1,179 @@
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { runnerClient, type ProviderInstance, type ProviderModel } from "@/app/runner-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ModelEditor } from "@/features/settings/model-editor";
+
+export function ProviderModels({
+  instance,
+  saved,
+  models,
+  apis,
+  onChange,
+}: {
+  instance: ProviderInstance;
+  saved: boolean;
+  models: ProviderModel[];
+  apis: string[];
+  onChange: (instance: ProviderInstance) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<ProviderModel | "new" | null>(null);
+  const needle = search.toLowerCase();
+  const searchQuery = useQuery({
+    queryKey: ["provider-settings", "model-search", instance.id, saved, search],
+    queryFn: () =>
+      runnerClient.providerRequest({
+        action: "list",
+        ...(saved ? { instanceId: instance.id } : { type: instance.type }),
+        search,
+      }),
+    enabled: !!search.trim(),
+    retry: false,
+  });
+  const matchingModels = search.trim() ? (searchQuery.data?.models ?? []) : models;
+  // Include unsaved custom models without maintaining a second model catalog.
+  const custom = instance.customModels.flatMap((definition): ProviderModel[] =>
+    typeof definition.id === "string"
+      ? [
+          {
+            id: definition.id,
+            name: typeof definition.name === "string" ? definition.name : definition.id,
+            custom: true,
+            overridden: false,
+            visible: instance.visibleModels.includes(definition.id),
+            definition,
+          },
+        ]
+      : [],
+  );
+  const all = [...matchingModels.filter((model) => !model.custom), ...custom];
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <Input
+          aria-label="搜索模型"
+          placeholder="搜索模型名称或 ID"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <Button variant="outline" onClick={() => setEditing("new")}>
+          添加自定义模型
+        </Button>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        勾选的模型会在 Bot 选择器中显示。隐藏不会禁止已有引用执行；建议至少选择一个模型。
+      </p>
+      {!instance.visibleModels.length && (
+        <p role="status" className="text-sm">
+          尚未选择 Bot 可用模型。
+        </p>
+      )}
+      {editing && (
+        <ModelEditor
+          key={editing === "new" ? "new" : editing.id}
+          instance={instance}
+          model={editing === "new" ? null : editing}
+          template={models[0]?.defaults ?? models[0]?.definition}
+          apiOptions={[
+            ...new Set([
+              ...apis,
+              ...models.flatMap((model) =>
+                typeof model.definition.api === "string" ? [model.definition.api] : [],
+              ),
+            ]),
+          ]}
+          onChange={onChange}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {searchQuery.isFetching && (
+        <p role="status" className="text-sm">
+          正在搜索模型…
+        </p>
+      )}
+      {searchQuery.error && (
+        <p role="alert" className="text-destructive text-sm">
+          模型搜索失败，请重试。
+        </p>
+      )}
+      <ul className="max-h-96 space-y-2 overflow-auto" aria-label="模型目录">
+        {all
+          .filter((model) => `${model.id} ${model.name}`.toLowerCase().includes(needle))
+          .map((model) => (
+            <li key={model.id} className="space-y-2 rounded-lg border p-3">
+              <div className="flex items-center gap-2">
+                <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    aria-label={`在 Bot 中显示 ${model.id}`}
+                    checked={instance.visibleModels.includes(model.id)}
+                    onChange={(event) =>
+                      onChange({
+                        ...instance,
+                        visibleModels: event.target.checked
+                          ? [...instance.visibleModels, model.id]
+                          : instance.visibleModels.filter((id) => id !== model.id),
+                      })
+                    }
+                  />
+                  <span className="truncate">{model.name}</span>
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`编辑模型 ${model.id}`}
+                  onClick={() => setEditing(model)}
+                >
+                  编辑
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs break-all">
+                {model.id} ·{" "}
+                {model.custom
+                  ? "自定义"
+                  : instance.modelOverrides[model.id]
+                    ? "已覆盖"
+                    : "内置默认"}
+              </p>
+              {!model.custom && instance.modelOverrides[model.id] && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const overrides = { ...instance.modelOverrides };
+                    delete overrides[model.id];
+                    onChange({ ...instance, modelOverrides: overrides });
+                    setEditing(null);
+                  }}
+                >
+                  恢复 {model.id} 内置默认值
+                </Button>
+              )}
+              {model.custom && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    onChange({
+                      ...instance,
+                      customModels: instance.customModels.filter((item) => item.id !== model.id),
+                      visibleModels: instance.visibleModels.filter((id) => id !== model.id),
+                    });
+                    setEditing(null);
+                  }}
+                >
+                  删除自定义模型 {model.id}
+                </Button>
+              )}
+            </li>
+          ))}
+      </ul>
+      {all.length === 0 && (
+        <p className="text-muted-foreground text-sm">目录为空，可以添加自定义模型。</p>
+      )}
+    </div>
+  );
+}

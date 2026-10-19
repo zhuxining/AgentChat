@@ -79,6 +79,9 @@ pub enum RunnerRequest {
     Abort {
         conversation_id: u64,
     },
+    ProviderRequest {
+        request: Value,
+    },
     SetProviderCredential {
         api_key: Option<String>,
     },
@@ -219,6 +222,31 @@ impl RunnerRequest {
                     return Err("输入或请求 ID 无效".to_owned());
                 }
             }
+            Self::ProviderRequest { request } => {
+                let action = request.get("action").and_then(Value::as_str);
+                if !request.is_object()
+                    || !action.is_some_and(|action| {
+                        [
+                            "list",
+                            "save",
+                            "remove",
+                            "test",
+                            "writeCredential",
+                            "deleteCredential",
+                            "login",
+                            "loginStatus",
+                            "loginRespond",
+                            "cancelLogin",
+                            "logout",
+                            "refreshModels",
+                        ]
+                        .contains(&action)
+                    })
+                    || serde_json::to_vec(request).map_or(true, |value| value.len() > 900_000)
+                {
+                    return Err("Provider 操作无效或超过大小限制".to_owned());
+                }
+            }
             Self::SetProviderCredential { api_key } => {
                 if api_key
                     .as_ref()
@@ -312,6 +340,7 @@ impl RunnerProcess {
         let mut command = Command::new(node);
         command
             .arg(&entry)
+            .arg("--native-rpc")
             .arg("--data-dir")
             .arg(data_dir)
             .env_remove("DEEPSEEK_API_KEY")
@@ -319,12 +348,13 @@ impl RunnerProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        Self::spawn_command(&mut command, api_key)
+        Self::spawn_command(&mut command, api_key, data_dir)
     }
 
     pub(crate) fn spawn_command(
         command: &mut Command,
         api_key: Option<String>,
+        data_dir: &Path,
     ) -> Result<Self, String> {
         let mut child = command
             .spawn()
@@ -346,13 +376,24 @@ impl RunnerProcess {
                 return Err(format!("设置 Runner 输入通道失败：{error}"));
             }
         }
+        let stdin = Arc::new(Mutex::new(stdin));
+        let stdin_reader = Arc::clone(&stdin);
+        let credential_dir = data_dir.to_owned();
         let pending: Pending = Arc::default();
         let closed = Arc::new(AtomicBool::new(false));
         let pending_reader = Arc::clone(&pending);
         let closed_reader = Arc::clone(&closed);
         let reader = thread::Builder::new()
             .name("agentchat-runner-reader".to_owned())
-            .spawn(move || read_responses(stdout, pending_reader, closed_reader));
+            .spawn(move || {
+                read_responses(
+                    stdout,
+                    pending_reader,
+                    closed_reader,
+                    stdin_reader,
+                    credential_dir,
+                )
+            });
         if let Err(error) = reader {
             let _ = child.kill();
             let _ = child.wait();
@@ -360,7 +401,7 @@ impl RunnerProcess {
         }
 
         let process = Self {
-            stdin: Arc::new(Mutex::new(stdin)),
+            stdin,
             child: Arc::new(Mutex::new(child)),
             pending,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -437,40 +478,7 @@ impl RunnerProcess {
     }
 
     fn write_message(&self, message: &[u8], allow_closing: bool) -> Result<(), String> {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut stdin = loop {
-            match self.stdin.try_lock() {
-                Ok(stdin) => break stdin,
-                Err(std::sync::TryLockError::Poisoned(_)) => {
-                    return Err("Runner 输入通道不可用".to_owned())
-                }
-                Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(5))
-                }
-                Err(_) => return Err("等待 Runner 输入通道超时".to_owned()),
-            }
-        };
-        if self.closed.load(Ordering::Acquire) && !allow_closing {
-            return Err("Runner 已关闭".to_owned());
-        }
-        let mut frame = message.to_vec();
-        frame.push(b'\n');
-        let mut remaining = frame.as_slice();
-        while !remaining.is_empty() {
-            if Instant::now() >= deadline {
-                return Err("发送 Runner 请求超时".to_owned());
-            }
-            match stdin.write(remaining) {
-                Ok(0) => return Err("Runner 输入通道已关闭".to_owned()),
-                Ok(written) => remaining = &remaining[written..],
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5))
-                }
-                Err(error) => return Err(format!("发送 Runner 请求失败：{error}")),
-            }
-        }
-        Ok(())
+        write_frame(&self.stdin, &self.closed, message, allow_closing)
     }
 
     pub fn shutdown(&self) {
@@ -521,6 +529,48 @@ impl RunnerProcess {
     }
 }
 
+fn write_frame(
+    input: &Mutex<ChildStdin>,
+    closed: &AtomicBool,
+    message: &[u8],
+    allow_closing: bool,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut stdin = loop {
+        match input.try_lock() {
+            Ok(stdin) => break stdin,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err("Runner 输入通道不可用".to_owned())
+            }
+            Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(5))
+            }
+            Err(_) => return Err("等待 Runner 输入通道超时".to_owned()),
+        }
+    };
+    if closed.load(Ordering::Acquire) && !allow_closing {
+        return Err("Runner 已关闭".to_owned());
+    }
+    let mut frame = message.to_vec();
+    frame.push(b'\n');
+    let mut remaining = frame.as_slice();
+    while !remaining.is_empty() {
+        if Instant::now() >= deadline {
+            return Err("发送 Runner 请求超时".to_owned());
+        }
+        match stdin.write(remaining) {
+            Ok(0) => return Err("Runner 输入通道已关闭".to_owned()),
+            Ok(written) => remaining = &remaining[written..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5))
+            }
+            Err(error) => return Err(format!("发送 Runner 请求失败：{error}")),
+        }
+    }
+    Ok(())
+}
+
 fn runner_entry(resource_dir: &Path) -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("AGENTCHAT_RUNNER_ENTRY") {
         return Ok(PathBuf::from(path));
@@ -536,7 +586,39 @@ fn runner_entry(resource_dir: &Path) -> Result<PathBuf, String> {
     Err("Runner 尚未构建，请先运行根目录 build 命令".to_owned())
 }
 
-fn read_responses(stdout: impl std::io::Read, pending: Pending, closed: Arc<AtomicBool>) {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeRequest {
+    native_id: u64,
+    method: String,
+    params: Value,
+}
+
+fn native_response(data_dir: &Path, frame: Value) -> Result<Value, String> {
+    let native_id = frame
+        .get("nativeId")
+        .and_then(Value::as_u64)
+        .filter(|id| *id > 0 && *id <= 9_007_199_254_740_991)
+        .ok_or("内部凭据请求 ID 无效")?;
+    let result = match serde_json::from_value::<NativeRequest>(frame) {
+        Ok(request) if request.native_id == native_id && request.params.is_object() => {
+            crate::credentials::native_request(data_dir, &request.method, request.params)
+        }
+        _ => Err("内部凭据请求格式无效".to_owned()),
+    };
+    Ok(match result {
+        Ok(result) => serde_json::json!({"nativeId":native_id,"ok":true,"result":result}),
+        Err(error) => serde_json::json!({"nativeId":native_id,"ok":false,"error":error}),
+    })
+}
+
+fn read_responses(
+    stdout: impl std::io::Read,
+    pending: Pending,
+    closed: Arc<AtomicBool>,
+    stdin: Arc<Mutex<ChildStdin>>,
+    data_dir: PathBuf,
+) {
     let mut reader = BufReader::new(stdout);
     loop {
         let line = match read_bounded_line(&mut reader) {
@@ -548,11 +630,33 @@ fn read_responses(stdout: impl std::io::Read, pending: Pending, closed: Arc<Atom
                 return;
             }
         };
-        let response = match serde_json::from_slice::<WireResponse>(&line) {
-            Ok(response) => response,
-            Err(error) => {
+        let frame = match serde_json::from_slice::<Value>(&line) {
+            Ok(frame) => frame,
+            Err(_) => {
                 closed.store(true, Ordering::Release);
-                fail_waiters(&pending, format!("Runner 返回了无效协议消息：{error}"));
+                fail_waiters(&pending, "Runner 返回了无效协议消息".to_owned());
+                return;
+            }
+        };
+        if frame.get("nativeId").is_some() {
+            let response = native_response(&data_dir, frame)
+                .and_then(|response| {
+                    serde_json::to_vec(&response).map_err(|_| "内部凭据响应编码失败".to_owned())
+                })
+                // Closing still allows the child's final credential persistence.
+                .and_then(|message| write_frame(&stdin, &closed, &message, true));
+            if response.is_err() {
+                closed.store(true, Ordering::Release);
+                fail_waiters(&pending, "Runner 内部凭据通道已失效".to_owned());
+                return;
+            }
+            continue;
+        }
+        let response = match serde_json::from_value::<WireResponse>(frame) {
+            Ok(response) => response,
+            Err(_) => {
+                closed.store(true, Ordering::Release);
+                fail_waiters(&pending, "Runner 返回了无效协议消息".to_owned());
                 return;
             }
         };
@@ -672,6 +776,146 @@ mod tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["op"], "createBot");
         assert_eq!(value["modelId"], "test-model");
+    }
+
+    #[test]
+    fn provider_request_allows_only_public_actions() {
+        for action in [
+            "list",
+            "save",
+            "remove",
+            "test",
+            "writeCredential",
+            "deleteCredential",
+            "login",
+            "loginStatus",
+            "loginRespond",
+            "cancelLogin",
+            "logout",
+            "refreshModels",
+        ] {
+            let request: RunnerRequest = serde_json::from_value(serde_json::json!({
+                "op":"providerRequest", "request":{"action":action}
+            }))
+            .unwrap();
+            assert!(request.validate().is_ok(), "{action}");
+            assert_eq!(
+                serde_json::to_value(request).unwrap()["op"],
+                "providerRequest"
+            );
+        }
+        for request in [
+            Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"action":"readCredential"}),
+            serde_json::json!({"action":"env"}),
+            serde_json::json!({"action":7}),
+            serde_json::json!({"action":"save", "extra":"x".repeat(900_000)}),
+        ] {
+            assert!(RunnerRequest::ProviderRequest { request }
+                .validate()
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn native_frames_reject_unknown_fields_methods_and_invalid_ids_without_leaking_params() {
+        let root = Path::new("/unused");
+        for native_id in [
+            Value::Null,
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(9_007_199_254_740_992u64),
+        ] {
+            assert!(native_response(
+                root,
+                serde_json::json!({"nativeId":native_id,"method":"env","params":{"name":"HOME"}})
+            )
+            .is_err());
+        }
+        for frame in [
+            serde_json::json!({"nativeId":1,"method":"readSecret","params":{"key":"private-value"}}),
+            serde_json::json!({"nativeId":1,"method":"env","params":{"name":"INVALID=private-value"}}),
+            serde_json::json!({"nativeId":1,"method":"env","params":[],"unexpected":"private-value"}),
+        ] {
+            let response = native_response(root, frame).unwrap();
+            assert_eq!(response["ok"], false);
+            assert_eq!(response["nativeId"], 1);
+            assert!(!response.to_string().contains("private-value"));
+        }
+    }
+
+    #[test]
+    fn native_startup_and_interleaved_requests_survive_a_request_timeout() {
+        static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
+        let directory = std::env::temp_dir().join(format!(
+            "agentchat-native-pipe-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let script = r#"
+const readline = require('node:readline');
+const waiting = new Map(); let nextNative = 1;
+const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+const native = (method, params) => new Promise(resolve => {
+  const nativeId = nextNative++; waiting.set(nativeId, resolve);
+  send({nativeId, method, params});
+});
+const source = {type:'file',path:'credentials/providers.json',entry:'instance'};
+const startup = native('writeCredential', {source, credential:{type:'api_key',key:'test-key'}});
+readline.createInterface({input:process.stdin}).on('line', async line => {
+  const request = JSON.parse(line);
+  if (request.nativeId) { const resolve = waiting.get(request.nativeId); waiting.delete(request.nativeId); resolve(request); return; }
+  if (request.op === 'close') { send({id:request.id,ok:true,result:{closed:true}}); process.exit(0); }
+  await startup;
+  const value = await native('readCredential', {source});
+  const denied = await native('deleteCredential', {source:{type:'env',variable:'HOME'}});
+  const reply = () => send({id:request.id,ok:true,result:{nativeOk:value.ok,key:value.result.key,denied:!denied.ok}});
+  if (request.op === 'submit') setTimeout(reply, 50); else reply();
+});
+"#;
+        let mut command = Command::new("node");
+        command
+            .arg("-e")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        let process = RunnerProcess::spawn_command(&mut command, None, &directory).unwrap();
+        let initialized = process.request(RunnerRequest::Initialize).unwrap().result;
+        assert_eq!(initialized["key"], "test-key");
+        assert_eq!(initialized["denied"], true);
+        assert!(process
+            .request_inner(
+                RunnerRequest::Submit {
+                    conversation_id: 1,
+                    text: "delayed".to_owned(),
+                    request_id: "delayed".to_owned(),
+                },
+                false,
+                Duration::from_millis(10)
+            )
+            .is_err());
+        let mut callers = Vec::new();
+        for id in 0..16 {
+            let process = process.clone();
+            callers.push(thread::spawn(move || {
+                process
+                    .request(RunnerRequest::Snapshot {
+                        conversation_id: id,
+                    })
+                    .unwrap()
+                    .result
+            }));
+        }
+        for caller in callers {
+            let result = caller.join().unwrap();
+            assert_eq!(result["nativeOk"], true);
+            assert_eq!(result["denied"], true);
+        }
+        process.shutdown();
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

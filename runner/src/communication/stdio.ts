@@ -1,51 +1,30 @@
 import type { Runner } from "../harness/open.js";
 import { createRequestHandler } from "./handlers.js";
+import { createNativeStdio, type NativeStdio } from "./native.js";
 
-export function serveStdio(runner: Runner) {
+export function serveStdio(runner: Runner, transport: NativeStdio = createNativeStdio()) {
   const handle = createRequestHandler(runner);
   const maxMessageBytes = 1_048_576;
-  let buffered = "";
   let closing = false;
   let terminating = false;
   const pendingDispatches = new Set<Promise<void>>();
 
-  process.stdin.setEncoding("utf8");
-  process.stdin.on("data", (chunk: string) => {
-    if (terminating) return;
-    buffered += chunk;
-    let newline = buffered.indexOf("\n");
-    while (newline >= 0) {
-      const rawLine = buffered.slice(0, newline);
-      const line = rawLine.replace(/\r$/, "");
-      buffered = buffered.slice(newline + 1);
-      if (Buffer.byteLength(rawLine, "utf8") + 1 > maxMessageBytes) {
-        terminateProtocol("Runner protocol message exceeded the byte limit");
-        return;
-      }
-      trackDispatch(line);
-      newline = buffered.indexOf("\n");
-    }
-    if (Buffer.byteLength(buffered, "utf8") > maxMessageBytes) {
-      terminateProtocol("Runner protocol message exceeded the byte limit");
-    }
-  });
-
-  process.stdin.on("end", () => {
-    if (buffered.length > 0) {
-      terminateProtocol("Runner input ended with an incomplete protocol message");
-      return;
-    }
-    if (terminating) return;
-    const shouldCloseHarness = !closing;
-    closing = true;
-    void Promise.allSettled([...pendingDispatches]).then(
-      async () => {
-        if (shouldCloseHarness) await handle({ op: "close" });
-        process.exit(0);
-      },
-      () => process.exit(1),
-    );
-  });
+  transport.attach(
+    trackDispatch,
+    () => {
+      if (terminating) return;
+      const shouldCloseHarness = !closing;
+      closing = true;
+      void Promise.allSettled([...pendingDispatches]).then(
+        async () => {
+          if (shouldCloseHarness) await handle({ op: "close" });
+          process.exit(0);
+        },
+        () => process.exit(1),
+      );
+    },
+    terminateProtocol,
+  );
 
   function trackDispatch(line: string) {
     const operation = dispatch(line);

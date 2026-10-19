@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { ProviderRequest, ProviderResponse } from "../../contracts/providers";
+export type { ProviderInstance, ProviderModel, Json } from "../../contracts/providers";
+
 export type RuntimeStatus = {
   status: "ready" | "missing" | "incompatible" | "error";
   path: string | null;
@@ -87,7 +90,7 @@ export type ConfigurationStatus = {
   ready: boolean;
 };
 export type ConfigurationFile = { path: string; version: string; content: string };
-export type ProviderOption = { name: string; models: string[] };
+export type ProviderOption = { name: string; label?: string; models: string[] };
 export type InitializeResult = {
   bots: Bot[];
   botDefaults: BotDefaults | null;
@@ -103,6 +106,7 @@ export type InitializeResult = {
 };
 
 export type RunnerRequest =
+  | { op: "providerRequest"; request: ProviderRequest }
   | { op: "initialize" }
   | { op: "reloadConfiguration" }
   | { op: "readConfiguration"; path: string }
@@ -127,6 +131,8 @@ async function request<T>(message: RunnerRequest): Promise<T> {
 }
 
 export const runnerClient = {
+  providerRequest: (input: ProviderRequest) =>
+    request<ProviderResponse>({ op: "providerRequest", request: input }),
   runtimeStatus: () => invoke<RuntimeStatus>("runtime_status"),
   installRuntime: () => invoke<RuntimeStatus>("install_runtime"),
   initialize: () => request<InitializeResult>({ op: "initialize" }),
@@ -159,8 +165,6 @@ export const runnerClient = {
   snapshot: (conversationId: number) =>
     request<ConversationSnapshot>({ op: "snapshot", conversationId }),
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
-  setProviderCredential: (apiKey: string | null) =>
-    invoke<{ configured: boolean; runnerUpdated: boolean }>("set_provider_credential", { apiKey }),
   startRunner: () => invoke<void>("start_runner"),
   stopRunner: () => invoke<void>("stop_runner"),
   restartRunner: () => invoke<void>("restart_runner"),

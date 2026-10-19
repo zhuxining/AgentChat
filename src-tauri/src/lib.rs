@@ -48,7 +48,6 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::runner_request,
-            commands::set_provider_credential,
             commands::restart_runner,
             commands::start_runner,
             commands::stop_runner,

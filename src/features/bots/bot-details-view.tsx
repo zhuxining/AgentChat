@@ -18,6 +18,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initializeBotDraft } from "@/features/bots/bot-draft";
+import { BotModelSelect } from "@/features/bots/bot-model-select";
 import { CapabilityFields } from "@/features/bots/capability-fields";
 import { GoalEditor } from "@/features/bots/goal-editor";
 
@@ -62,9 +63,6 @@ export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean
   }
 
   const provider = catalog.providers.find((item) => item.name === bot.model.provider);
-  const modelOptions = provider?.models.length
-    ? provider.models
-    : [bot.model.modelId].filter(Boolean);
 
   return (
     <div className="space-y-5">
@@ -82,7 +80,7 @@ export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean
         <div className="min-w-0">
           <p className="truncate font-medium">{bot.name}</p>
           <p className="text-muted-foreground truncate text-xs">
-            {bot.model.provider} · {bot.model.modelId}
+            {provider?.label ?? bot.model.provider} · {bot.model.modelId}
           </p>
         </div>
       </div>
@@ -129,32 +127,32 @@ export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean
             className="bg-muted h-7 w-40 rounded-md border px-1.5 text-xs"
             value={bot.model.provider}
             disabled={disabled || catalog.providers.length === 0}
-            onChange={(event) => void save({ provider: event.target.value })}
+            onChange={(event) => {
+              const next = catalog.providers.find((item) => item.name === event.target.value);
+              void save({
+                provider: event.target.value,
+                modelId: next?.models[0] ?? bot.model.modelId,
+              });
+            }}
           >
             {catalog.providers.length === 0 && (
               <option value={bot.model.provider}>{bot.model.provider}</option>
             )}
             {catalog.providers.map((item) => (
               <option key={item.name} value={item.name}>
-                {item.name}
+                {item.label ?? item.name}
               </option>
             ))}
           </select>
         </DetailsRow>
         <DetailsRow label="模型">
-          <select
-            aria-label="模型"
-            className="bg-muted h-7 w-40 rounded-md border px-1.5 text-xs"
-            value={bot.model.modelId}
+          <BotModelSelect
+            providers={catalog.providers}
+            provider={bot.model.provider}
+            modelId={bot.model.modelId}
             disabled={disabled}
-            onChange={(event) => void save({ modelId: event.target.value })}
-          >
-            {modelOptions.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
+            onChange={(provider, modelId) => void save({ provider, modelId })}
+          />
         </DetailsRow>
         <DetailsRow label="思考级别">
           <select

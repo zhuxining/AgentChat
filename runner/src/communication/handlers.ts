@@ -62,6 +62,8 @@ export function createRequestHandler(runner: Runner) {
       throw new Error("请求格式无效");
     const input = request as Record<string, unknown>;
     switch (input.op) {
+      case "providerRequest":
+        return runner.providerRequest(input.request);
       case "initialize":
         return runner.initialize();
       case "createBot":

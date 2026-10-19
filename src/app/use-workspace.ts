@@ -307,15 +307,6 @@ export function useWorkspace(client: RunnerClient) {
     });
   }
 
-  function setProviderCredential(apiKey: string | null) {
-    return runAction(async () => {
-      const result = await client.setProviderCredential(apiKey);
-      setProviderConfigured(result.configured);
-      setCredentialWarning("");
-      return true;
-    });
-  }
-
   function submitMessage() {
     const text = input.trim();
     if (conversationId === null || !text) return Promise.resolve(false);
@@ -422,7 +413,6 @@ export function useWorkspace(client: RunnerClient) {
       reloadConfiguration,
       readConfiguration: client.readConfiguration,
       saveConfiguration,
-      setProviderCredential,
     },
   };
 }

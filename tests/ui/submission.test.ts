@@ -13,6 +13,15 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 
 vi.mock("../../src/app/runner-client", () => ({
   runnerClient: {
+    runtimeStatus: vi.fn<typeof runnerClient.runtimeStatus>().mockResolvedValue({
+      status: "ready",
+      path: "/test/node",
+      version: "v24.0.0",
+      source: "system",
+      architecture: "arm64",
+      detail: null,
+    }),
+    startRunner: vi.fn<typeof runnerClient.startRunner>().mockResolvedValue(undefined),
     updateBot: vi.fn<typeof runnerClient.updateBot>(),
     archiveBot: vi.fn<typeof runnerClient.archiveBot>(),
     reloadConfiguration: vi.fn<typeof runnerClient.reloadConfiguration>(),
@@ -21,7 +30,6 @@ vi.mock("../../src/app/runner-client", () => ({
     stopRunner: vi.fn<typeof runnerClient.stopRunner>(),
     restartRunner: vi.fn<typeof runnerClient.restartRunner>(),
     applyBotSettings: vi.fn<typeof runnerClient.applyBotSettings>(),
-    setProviderCredential: vi.fn<typeof runnerClient.setProviderCredential>(),
     createBot: vi.fn<typeof runnerClient.createBot>(),
     createConversation: vi.fn<typeof runnerClient.createConversation>(),
     saveGoal: vi.fn<typeof runnerClient.saveGoal>(),
@@ -393,34 +401,14 @@ it("keeps tool selection consistent while editing and applies settings only on r
   await waitFor(() => expect(runnerClient.applyBotSettings).toHaveBeenCalledWith(41));
 });
 
-it("clears the credential draft after saving and when leaving settings", async () => {
+it("shows a recovery message when an older Runner has no provider management contract", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
-  vi.mocked(runnerClient.setProviderCredential).mockResolvedValue({
-    configured: true,
-    runnerUpdated: true,
-  });
   renderApp();
   fireEvent.click(await screen.findByRole("button", { name: "应用设置" }));
   const settings = await screen.findByRole("region", { name: "设置" });
-  fireEvent.change(within(settings).getByLabelText("DeepSeek API Key"), {
-    target: { value: "test-only-credential" },
-  });
-  fireEvent.click(within(settings).getByRole("button", { name: "安全保存" }));
-  await waitFor(() =>
-    expect((within(settings).getByLabelText("DeepSeek API Key") as HTMLInputElement).value).toBe(
-      "",
-    ),
-  );
-  expect(runnerClient.setProviderCredential).toHaveBeenCalledWith("test-only-credential");
-  fireEvent.change(within(settings).getByLabelText("DeepSeek API Key"), {
-    target: { value: "unsaved-test-value" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "返回" }));
-  await waitFor(() => expect(screen.queryByRole("region", { name: "设置" })).toBeNull());
-  fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
-  const reopened = await screen.findByRole("region", { name: "设置" });
-  expect((within(reopened).getByLabelText("DeepSeek API Key") as HTMLInputElement).value).toBe("");
+  expect(await within(settings).findByText(/如果后台版本较旧/)).toBeTruthy();
+  expect(within(settings).getByRole("button", { name: "重新读取供应商" })).toBeTruthy();
 });
 
 it("preserves an unsaved work goal while the details pane is pushed away", async () => {
@@ -492,9 +480,9 @@ it("stops background polling with the Runner and reconnects without closing the 
     await new Promise((resolve) => setTimeout(resolve, 1_300));
   });
   expect(runnerClient.snapshot).toHaveBeenCalledTimes(calls);
-  expect(runnerClient.initialize).toHaveBeenCalledTimes(1);
+  expect(runnerClient.initialize).toHaveBeenCalledTimes(2);
   fireEvent.click(within(settings).getByRole("button", { name: "启动并连接" }));
-  await waitFor(() => expect(runnerClient.initialize).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(runnerClient.initialize).toHaveBeenCalledTimes(3));
   expect(runnerClient.restartRunner).toHaveBeenCalledTimes(1);
 });
 
@@ -622,7 +610,7 @@ it("renders Bot details when an older background Runner omits provider options",
     (within(details).getByRole("combobox", { name: "服务商" }) as HTMLSelectElement).value,
   ).toBe("deepseek");
   expect((within(details).getByRole("combobox", { name: "模型" }) as HTMLSelectElement).value).toBe(
-    "deepseek-chat",
+    JSON.stringify(["deepseek", "deepseek-chat"]),
   );
 });
 

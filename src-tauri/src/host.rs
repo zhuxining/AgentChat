@@ -20,7 +20,6 @@ pub struct RunnerConnection {
 enum HostRequest {
     Ping,
     Runner { request: Box<RunnerRequest> },
-    SetCredential { api_key: Option<String> },
     Stop,
 }
 
@@ -42,7 +41,6 @@ struct HostState {
     process: Result<RunnerProcess, String>,
     warning: Mutex<Option<String>>,
     stopping: AtomicBool,
-    credential_gate: Mutex<()>,
 }
 
 impl HostState {
@@ -51,7 +49,6 @@ impl HostState {
             process,
             warning: Mutex::new(warning),
             stopping: AtomicBool::new(false),
-            credential_gate: Mutex::new(()),
         }
     }
 
@@ -91,30 +88,6 @@ impl HostState {
                     }
                 }
                 Ok(reply.result)
-            }
-            HostRequest::SetCredential { api_key } => {
-                let _gate = self.credential_gate.lock().map_err(|_| "凭据状态不可用")?;
-                let api_key = api_key
-                    .map(|key| key.trim().to_owned())
-                    .filter(|key| !key.is_empty());
-                if api_key.as_ref().is_some_and(|key| key.len() > 8_000) {
-                    return Err("Provider 凭据过长".to_owned());
-                }
-                crate::credentials::write_deepseek_api_key(api_key.as_deref())?;
-                *self.warning.lock().map_err(|_| "凭据状态不可用")? = None;
-                let key = api_key.or_else(|| std::env::var("DEEPSEEK_API_KEY").ok());
-                let configured = key.is_some();
-                let updated = self
-                    .process
-                    .as_ref()
-                    .ok()
-                    .and_then(|process| {
-                        process
-                            .request(RunnerRequest::SetProviderCredential { api_key: key })
-                            .ok()
-                    })
-                    .is_some();
-                Ok(serde_json::json!({ "configured": configured, "runnerUpdated": updated }))
             }
         }
     }
@@ -272,10 +245,6 @@ impl RunnerConnection {
         .map(|result| RunnerReply { result })
     }
 
-    pub fn set_credential(&self, api_key: Option<String>) -> Result<Value, String> {
-        self.send(HostRequest::SetCredential { api_key })
-    }
-
     pub fn stop(&self) -> Result<(), String> {
         #[cfg(unix)]
         {
@@ -375,18 +344,16 @@ fn run_host(data_dir: &Path, resource_dir: &Path) -> Result<(), String> {
         let Some(instance) = unix::Instance::bind(data_dir)? else {
             return Ok(());
         };
-        let (api_key, warning) = crate::credentials::effective_deepseek_api_key();
-        let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, api_key);
-        unix::serve(instance, HostState::new(process, warning))
+        let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, None);
+        unix::serve(instance, HostState::new(process, None))
     }
     #[cfg(windows)]
     {
         let Some(instance) = windows::Instance::bind(data_dir)? else {
             return Ok(());
         };
-        let (api_key, warning) = crate::credentials::effective_deepseek_api_key();
-        let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, api_key);
-        windows::serve(instance, HostState::new(process, warning))
+        let process = crate::runner::RunnerProcess::spawn(data_dir, resource_dir, None);
+        windows::serve(instance, HostState::new(process, None))
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -765,7 +732,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        RunnerProcess::spawn_command(&mut command, None).unwrap()
+        RunnerProcess::spawn_command(&mut command, None, directory).unwrap()
     }
 
     #[test]
@@ -895,6 +862,14 @@ readline.createInterface({input:process.stdin}).on('line', line => {
             })
             .is_err()
         );
+        assert!(validate_public_request(&RunnerRequest::ProviderRequest {
+            request: serde_json::json!({"action":"list"})
+        })
+        .is_ok());
+        assert!(validate_public_request(&RunnerRequest::ProviderRequest {
+            request: serde_json::json!({"action":"readCredential"})
+        })
+        .is_err());
         let request: RunnerRequest = serde_json::from_value(serde_json::json!({
             "op":"saveConfiguration", "path":"runner.json", "version":"hash", "content":"{}"
         }))

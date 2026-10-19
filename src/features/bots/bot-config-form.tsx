@@ -1,13 +1,20 @@
 import { useState } from "react";
 
-import type { BotDefaults, BotDraft, RunnerCapabilities } from "@/app/runner-client";
+import type {
+  BotDefaults,
+  BotDraft,
+  ProviderOption,
+  RunnerCapabilities,
+} from "@/app/runner-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initializeBotDraft } from "@/features/bots/bot-draft";
+import { BotModelSelect } from "@/features/bots/bot-model-select";
 import { CapabilityFields } from "@/features/bots/capability-fields";
 
 type Props = {
+  providers: ProviderOption[];
   capabilities: RunnerCapabilities;
   defaults: BotDefaults;
   busy: boolean;
@@ -18,7 +25,15 @@ type Props = {
 
 // Creation still needs the full field set at once; later changes happen inline on the
 // Bot detail view instead of reopening a form.
-export function BotConfigForm({ capabilities, defaults, busy, error, onSubmit, onCancel }: Props) {
+export function BotConfigForm({
+  providers,
+  capabilities,
+  defaults,
+  busy,
+  error,
+  onSubmit,
+  onCancel,
+}: Props) {
   const [draft, setDraft] = useState(() => initializeBotDraft(null, defaults));
   const { name, provider, modelId, thinkingLevel, instructions, cwd, extensions, tools } = draft;
   function updateDraft<K extends keyof BotDraft>(field: K, value: BotDraft[K]) {
@@ -43,21 +58,15 @@ export function BotConfigForm({ capabilities, defaults, busy, error, onSubmit, o
         />
       </label>
       <label className="block space-y-2 text-sm">
-        Provider 配置名称
-        <Input
-          aria-label="Provider 配置名称"
-          value={provider}
-          required
-          onChange={(event) => updateDraft("provider", event.target.value)}
-        />
-      </label>
-      <label className="block space-y-2 text-sm">
-        模型
-        <Input
-          aria-label="模型 ID"
-          value={modelId}
-          required
-          onChange={(event) => updateDraft("modelId", event.target.value)}
+        模型接入与模型
+        <BotModelSelect
+          providers={providers}
+          provider={provider}
+          modelId={modelId}
+          disabled={busy}
+          onChange={(provider, modelId) =>
+            setDraft((previous) => ({ ...previous, provider, modelId }))
+          }
         />
       </label>
       <label className="text-muted-foreground block text-xs">

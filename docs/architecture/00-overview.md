@@ -47,13 +47,14 @@ src-tauri/src/
 ├─ host.rs                     # 独立后台宿主、生命周期与 Unix socket
 ├─ host/windows.rs             # Windows 命名管道、ACL 与帧传输
 ├─ runtime.rs                  # Node 检测、包管理器与校验下载
-├─ runner.rs                   # Node 子进程与私有 JSONL
-└─ credentials.rs              # 系统凭据访问
+├─ runner.rs                   # Node 子进程、私有 JSONL 与反向凭据帧
+└─ credentials.rs              # 系统凭据库、环境与受限凭据文件
 runner/src/
 ├─ main.ts                     # 启动与关闭入口
 ├─ config/                     # schema、文件读写、有效值、重载和冲突
+├─ providers/                  # 接入实例、模型覆盖、认证、测试与目录缓存
 ├─ harness/                    # 装配与公开操作、视图、extensions
-└─ communication/              # 外部解析、路由、stdio
+└─ communication/              # 外部解析、路由、stdio 与 native 凭据桥
 ```
 
 `config/` 回答期望配置是什么、哪些有效；不操作 Harness。`harness/` 直接组合 models、Registry、settings、ExecutionEnv 和 Storage，按公开 API 执行、观察工作。`communication/` 将不可信外部输入转换为类型化操作，维护帧大小、关联与连接生命周期，不持有另一份执行状态。

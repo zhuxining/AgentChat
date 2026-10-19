@@ -58,18 +58,25 @@ export class Configuration {
   private constructor(
     dataDir: string,
     private readonly validateAgent?: ValidateAgent,
+    private readonly onRunnerParsed?: (runner: RunnerConfiguration) => void,
   ) {
     this.dataDir = dataDir;
     this.files = new ConfigurationFiles(dataDir);
   }
 
-  static async open(dataDir: string, validateAgent?: ValidateAgent): Promise<Configuration> {
+  static async open(
+    dataDir: string,
+    validateAgent?: ValidateAgent,
+    onRunnerParsed?: (runner: RunnerConfiguration) => void,
+  ): Promise<Configuration> {
     await mkdir(dataDir, { recursive: true, mode: 0o700 });
-    const configuration = new Configuration(await realpath(dataDir), validateAgent);
+    const configuration = new Configuration(await realpath(dataDir), validateAgent, onRunnerParsed);
     await configuration.initialize();
     await configuration.reload();
     return configuration;
   }
+
+  beforeRunnerSave?: (runner: RunnerConfiguration) => Promise<void>;
 
   get runner(): RunnerConfiguration | undefined {
     return this.activeRunner && structuredClone(this.activeRunner);
@@ -191,6 +198,7 @@ export class Configuration {
 
   private resolveRunner(content: string): RunnerConfiguration {
     const runner = parseRunner(parseJSON(content));
+    this.onRunnerParsed?.(runner);
     this.validate({ ...runner.botDefaults, cwd: resolve(this.dataDir, runner.workspace.root) });
     return runner;
   }
@@ -406,7 +414,10 @@ export class Configuration {
     if (typeof content !== "string") throw new ConfigurationFailure("配置内容无效");
     const overrides = new Map([[path, content]]);
     if (target.botId) await this.resolveBot(target.botId, overrides);
-    else this.resolveRunner(content);
+    else {
+      const runner = this.resolveRunner(content);
+      await this.beforeRunnerSave?.(runner);
+    }
     try {
       await this.files.write(path, content, async () => {
         const current = await this.readConfiguration(path);

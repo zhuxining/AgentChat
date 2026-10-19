@@ -1,5 +1,8 @@
 import type { AgentState, HarnessSettings, ModelRef } from "@earendil-works/pi-durable";
 
+import type { ProviderInstance } from "../../../contracts/providers.js";
+import { parseInstance } from "../providers/schema.js";
+
 export type ThinkingLevel = Exclude<NonNullable<AgentState["thinkingLevel"]>, "max">;
 export type AgentConfiguration = {
   model: ModelRef;
@@ -10,10 +13,10 @@ export type AgentConfiguration = {
   tools: string[];
 };
 export type RunnerConfiguration = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   name: string;
   workspace: { root: string };
-  providers: Record<string, { type: "deepseek"; credentialRef: string }>;
+  providers: Record<string, { type: "deepseek"; credentialRef: string } | ProviderInstance>;
   botDefaults: Omit<AgentConfiguration, "instructionsFile"> & { instructions: string };
   harness: Pick<
     HarnessSettings,
@@ -202,13 +205,24 @@ export function parseRunner(value: unknown): RunnerConfiguration {
     ["schemaVersion", "name", "workspace", "providers", "botDefaults", "harness"],
     "runner",
   );
-  if (input.schemaVersion !== 1) invalid("schemaVersion");
+  if (input.schemaVersion !== 1 && input.schemaVersion !== 2) invalid("schemaVersion");
   const workspace = object(input.workspace, ["root"], "workspace");
   const providerInput = input.providers;
   if (!providerInput || typeof providerInput !== "object" || Array.isArray(providerInput))
     invalid("providers");
   const providers: RunnerConfiguration["providers"] = {};
   for (const [id, value] of Object.entries(providerInput)) {
+    if (input.schemaVersion === 2) {
+      const instance = parseInstance(value);
+      if (id !== instance.id) invalid("providers.id");
+      Object.defineProperty(providers, id, {
+        enumerable: true,
+        writable: true,
+        configurable: true,
+        value: instance,
+      });
+      continue;
+    }
     if (id !== "deepseek") invalid("providers.id");
     const provider = object(value, ["type", "credentialRef"], "providers");
     if (provider.type !== "deepseek") invalid("providers.type");
@@ -226,7 +240,7 @@ export function parseRunner(value: unknown): RunnerConfiguration {
   const defaults = agent(input.botDefaults, true);
   if (defaults.instructions === undefined) invalid("botDefaults.instructions");
   return {
-    schemaVersion: 1,
+    schemaVersion: input.schemaVersion,
     name: text(input.name, "name", 80),
     workspace: { root: text(workspace.root, "workspace.root") },
     providers,

@@ -17,6 +17,8 @@
 ```text
 <data-dir>/
 ├─ runner.json
+├─ provider-state.json         # 凭据修订号与显式刷新的模型目录缓存（无密钥）
+├─ credentials/                # 可选独立凭据文件（0600/0700）
 ├─ bots/
 │  └─ <bot-id>/
 │     ├─ bot.json
@@ -35,20 +37,29 @@
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "本机 Runner",
   "workspace": {
     "root": "workspaces"
   },
   "providers": {
-    "deepseek": {
+    "deepseek-work": {
+      "id": "deepseek-work",
+      "name": "工作用 DeepSeek",
       "type": "deepseek",
-      "credentialRef": "provider/deepseek"
+      "enabled": true,
+      "auth": {
+        "type": "apiKey",
+        "source": { "type": "keyring", "entry": "deepseek-work" }
+      },
+      "visibleModels": ["deepseek-chat", "deepseek-reasoner"],
+      "modelOverrides": {},
+      "customModels": []
     }
   },
   "botDefaults": {
     "model": {
-      "provider": "deepseek",
+      "provider": "deepseek-work",
       "modelId": "deepseek-chat"
     },
     "thinkingLevel": "medium",
@@ -60,18 +71,20 @@
 }
 ```
 
-| 字段             | 当前契约                                                                           |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `schemaVersion`  | 必须为 `1`；未知版本、未知字段或错误类型拒绝加载                                   |
-| `name`           | Runner 展示名称，不充当稳定身份                                                    |
-| `workspace.root` | 自动工作区的根路径；相对路径基于数据根目录，改变后不迁移已有目录                   |
-| `providers`      | Provider 声明；当前只实现键名和类型均为 `deepseek`，引用固定为 `provider/deepseek` |
-| `botDefaults`    | 创建 Bot 的模板；写入具体 Bot 后不再动态继承，当前默认指令为空                     |
-| `harness`        | 可省略或为 `{}`，未覆盖项沿用锁定库版本默认值                                      |
+| 字段             | 当前契约                                                                   |
+| ---------------- | -------------------------------------------------------------------------- |
+| `schemaVersion`  | `2` 为当前格式，`1` 仅用于读取并迁移；未知版本、未知字段或错误类型拒绝加载 |
+| `name`           | Runner 展示名称，不充当稳定身份                                            |
+| `workspace.root` | 自动工作区的根路径；相对路径基于数据根目录，改变后不迁移已有目录           |
+| `providers`      | 以稳定实例 ID 为键的完整接入定义；同一供应商类型可建多个实例               |
+| `botDefaults`    | 创建 Bot 的模板；写入具体 Bot 后不再动态继承，当前默认指令为空             |
+| `harness`        | 可省略或为 `{}`，未覆盖项沿用锁定库版本默认值                              |
 
-Provider 结构为未来多个已实现类型保留表达空间，**当前不支持任意 Provider ID/别名、任意凭据引用、baseUrl、自定义 Header 或通用 Provider 配置**。模型通过 `provider/modelId` 解析，当前模型适配提供 `deepseek-chat` 与 `deepseek-reasoner`。模型不可解析会显示配置诊断并阻止受影响的新建或显式应用，不静默改用其他模型。
+`schemaVersion` 为 `2` 时，`providers` 的键是稳定接入实例 ID，值是完整实例定义（供应商类型、显示名称、启停、连接、认证来源、参数、可见模型、模型覆盖与自定义模型）。同一供应商类型可以有多个实例；Bot 的 `provider` 引用实例 ID。`schemaVersion` 为 `1` 的旧文件按原 DeepSeek 结构读取，启动时迁移为 `2`，凭据引用显式选为旧系统凭据库条目或 `DEEPSEEK_API_KEY`。完整字段与运行时校验见 `contracts/providers.ts`、`runner/src/providers/` 和[模型供应商与凭据配置](04-model-providers.md)。
 
-密钥保存在原生宿主访问的系统凭据库中，引用不是密钥内容。开发时允许宿主读取 `DEEPSEEK_API_KEY`，随后通过私有通信供给 Provider 认证闭包；Node 工具环境剔除模型密钥。凭据更新与轮换是独立操作，不复制进快照；宿主环境变量改变需重启后台才能重新读取。
+模型覆盖是部分 `pi-ai` Model 字段，未覆盖字段随随包目录更新；自定义模型保存完整定义。模型元数据与请求级参数分开：当前 durable 公开设置只承载其 `ConversationStreamOptions` 子集，界面不为其余参数承诺可用性。
+
+密钥不在 `runner.json` 中。API Key 来源可为系统凭据库、后台宿主环境变量或 `credentials/` 下的独立文件；OAuth Token 保存到系统凭据库。普通配置、导出、日志、错误和状态响应只保留引用。工具环境剔除认证变量；与应用同一系统用户运行的工具仍不构成完整操作系统隔离。
 
 ### bots/<bot-id>/bot.json
 
@@ -130,15 +143,15 @@ Bot ID 取目录名，不在 JSON 中重复保存。下面以 `developer` 为示
 
 ### 保存、重载与生效
 
-| 操作或配置类型                   | 生效规则                                                                |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| 手工编辑                         | 启动或显式 `reloadConfiguration` 时读取，不监听文件变化                 |
-| UI 保存                          | 携带内容版本，校验后原子替换同一文件，并重载配置                        |
-| `botDefaults`                    | 只影响后续创建的 Bot                                                    |
-| Bot Agent 默认选择与独立指令内容 | 更新有效默认值；后续创建执行使用，已有执行空闲时显式 `applyBotSettings` |
-| `harness`                        | settings 在库下一次读取时使用新值，不为每次执行冻结一份全局策略         |
-| `providers`                      | 标记 `restartRequired`，重启后台后生效；不将重载等同资源重建            |
-| 数据根目录与 Storage             | 进程资源，停止旧实例并启动目标目录，不运行中切换                        |
+| 操作或配置类型                   | 生效规则                                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| 手工编辑                         | 启动或显式 `reloadConfiguration` 时读取，不监听文件变化                                  |
+| UI 保存                          | 携带内容版本，校验后原子替换同一文件，并重载配置                                         |
+| `botDefaults`                    | 只影响后续创建的 Bot                                                                     |
+| Bot Agent 默认选择与独立指令内容 | 更新有效默认值；后续创建执行使用，已有执行空闲时显式 `applyBotSettings`                  |
+| `harness`                        | settings 在库下一次读取时使用新值，不为每次执行冻结一份全局策略                          |
+| `providers`                      | 配置保存标记 `restartRequired`，重启后台后重建模型集合生效；凭据写入使旧连接测试版本过期 |
+| 数据根目录与 Storage             | 进程资源，停止旧实例并启动目标目录，不运行中切换                                         |
 
 UI 版本来自文件内容；Bot 配置版本包含所引用指令文件内容。保存前再次检查，发现外部编辑拒绝覆盖并要求刷新。原子替换减少半写入；不遵循协调的外部编辑器仍可能在同一瞬间覆盖，版本保护不是跨任意进程的事务。
 
