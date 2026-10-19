@@ -7,8 +7,7 @@ import {
   SparklesIcon,
   SquareIcon,
 } from "lucide-react";
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Fragment } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { useWorkspaceUi } from "@/app/workspace-ui";
@@ -30,7 +29,6 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
-import { Message, MessageContent } from "@/components/ui/message";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -41,9 +39,10 @@ import {
 } from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
+import { MessageBody } from "@/features/chat/message-content";
 import { useBotChat } from "@/features/chat/use-bot-chat";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
-import { useMarkdownPlugins } from "@/features/chat/use-markdown-plugins";
+import { useMessageEntrance } from "@/features/chat/use-message-entrance";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
 // Message ids are only unique inside a library Conversation, so rows are addressed by
@@ -65,11 +64,9 @@ export function ChatView({ botId }: { botId: string }) {
     })),
   );
   const segments = useBotTimeline(selection.botConversations);
-  const markdownPlugins = useMarkdownPlugins(
-    segments.flatMap((segment) => segment.snapshot.messages.map((message) => message.text)),
+  const messageTexts = segments.flatMap((segment) =>
+    segment.snapshot.messages.map((message) => message.text),
   );
-  // Only a row that arrives while its Conversation is on screen animates; loading a
-  // transcript or switching Bots must not replay entrances for existing history.
   const latestSegment = segments.at(-1);
   const latestMessage = latestSegment?.snapshot.messages
     .filter((message) => message.text && (message.role === "user" || message.role === "assistant"))
@@ -85,22 +82,11 @@ export function ChatView({ botId }: { botId: string }) {
     selection.conversationId !== null && snapshot === null && !snapshotUnavailable;
   const hasLiveTasks = (snapshot?.activeTasks.length ?? 0) > 0;
   const executing = snapshot?.activeTasks.some((task) => task.status === "running") ?? false;
-  const [animatedRowId, setAnimatedRowId] = useState<string | null>(null);
-  const previousLatestRef = useRef<{ conversationId: number | null; rowId: string | null }>({
-    conversationId: null,
-    rowId: null,
-  });
-  useLayoutEffect(() => {
-    const conversationId = selection.conversationId;
-    if (conversationId === null || !snapshot) return;
-    const previous = previousLatestRef.current;
-    if (previous.conversationId !== conversationId) {
-      setAnimatedRowId(null);
-    } else if (latestRowId && latestRowId !== previous.rowId) {
-      setAnimatedRowId(latestRowId);
-    }
-    previousLatestRef.current = { conversationId, rowId: latestRowId };
-  }, [latestRowId, selection.conversationId, snapshot]);
+  const animatedRowId = useMessageEntrance(
+    selection.conversationId,
+    latestRowId,
+    snapshot !== null,
+  );
   const hasConversation = selection.conversationId !== null;
   const executionStatus = snapshot
     ? executing
@@ -238,37 +224,14 @@ export function ChatView({ botId }: { botId: string }) {
                             : undefined
                         }
                       >
-                        <Message align={message.role === "user" ? "end" : "start"}>
-                          <MessageContent>
-                            {message.role === "user" ? (
-                              <Bubble align="end" variant="muted">
-                                <BubbleContent className="whitespace-pre-wrap">
-                                  {message.text}
-                                </BubbleContent>
-                              </Bubble>
-                            ) : (
-                              <Streamdown
-                                mode={
-                                  rowId(segment.conversation.id, message.id) === latestRowId &&
-                                  hasLiveTasks
-                                    ? "streaming"
-                                    : "static"
-                                }
-                                isAnimating={
-                                  rowId(segment.conversation.id, message.id) === latestRowId &&
-                                  hasLiveTasks
-                                }
-                                animated={false}
-                                plugins={markdownPlugins}
-                              >
-                                {message.text}
-                              </Streamdown>
-                            )}
-                            {message.truncated && (
-                              <span className="text-muted-foreground">（内容已截断）</span>
-                            )}
-                          </MessageContent>
-                        </Message>
+                        <MessageBody
+                          message={message}
+                          streaming={
+                            rowId(segment.conversation.id, message.id) === latestRowId &&
+                            hasLiveTasks
+                          }
+                          texts={messageTexts}
+                        />
                       </MessageScrollerItem>
                     ))}
                 </Fragment>

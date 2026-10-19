@@ -16,7 +16,7 @@ import { createAgentResolver } from "./agent.js";
 import { executionEnvironment } from "./environment.js";
 import { workGoalExtension } from "./extensions/work-goal.js";
 import { prepareProvider } from "./models.js";
-import { createOperations } from "./operations.js";
+import { createOperations } from "./operations/index.js";
 import { createRunnerRegistry } from "./registry.js";
 import { harnessSettings } from "./settings.js";
 import { createViews } from "./views.js";

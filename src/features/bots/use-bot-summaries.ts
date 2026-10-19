@@ -3,6 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import type { Bot, ConversationSnapshot, ConversationSummary } from "@/app/runner-client";
 import { snapshotOptions, useRunnerLifecycle } from "@/app/runner-queries";
 import { useWorkspaceResources } from "@/app/workspace-provider";
+import { selectLatestConversation } from "@/features/bots/bot-conversations";
 
 export type BotSummary =
   | { status: "empty" }
@@ -29,11 +30,7 @@ export function useBotSummaries(
   const { paused } = useRunnerLifecycle();
   const targets = bots.map((bot) => ({
     botId: bot.id,
-    conversationId:
-      conversations
-        .filter((item) => item.botId === bot.id)
-        .sort((left, right) => right.createdAt - left.createdAt || right.id - left.id)[0]?.id ??
-      null,
+    conversationId: selectLatestConversation(conversations, bot.id)?.id ?? null,
   }));
   const queries = useQueries({
     queries: targets.map((target) => ({

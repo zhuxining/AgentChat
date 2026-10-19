@@ -26,10 +26,20 @@ export function useProviderOperation() {
   });
 }
 
-export function providerError(cause: unknown) {
-  return cause instanceof Error
-    ? cause.message
-    : typeof cause === "string"
-      ? cause
-      : "供应商操作失败，请重试。";
+// Runner 错误文案直接透传；IPC/传输层的通用失败统一映射为可行动的中文提示，
+// 页面不再各自拼 catch 逻辑。
+const GENERIC_PROVIDER_ERROR = "供应商操作失败，请重试。";
+
+const transportErrorMap: Array<[pattern: RegExp, message: string]> = [
+  [/runner.*(unavailable|not running|未运行|不可用)/i, "Runner 未运行，请先启动或重连。"],
+  [/timed? ?out|超时/i, "操作超时，请检查 Runner 状态后重试。"],
+];
+
+export function providerError(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
+  if (!raw) return GENERIC_PROVIDER_ERROR;
+  for (const [pattern, message] of transportErrorMap) {
+    if (pattern.test(raw)) return message;
+  }
+  return raw;
 }

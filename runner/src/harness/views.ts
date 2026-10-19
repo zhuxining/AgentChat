@@ -4,7 +4,7 @@ import { AgentDoc, type Harness } from "@earendil-works/pi-durable";
 import type { createAgentResolver } from "./agent.js";
 import { GoalState } from "./extensions/work-goal.js";
 import { projectMessages } from "./messages.js";
-import { conversationById } from "./operations.js";
+import { conversationById } from "./operations/index.js";
 import { ConversationMetadata } from "./product-state.js";
 
 const context = BACKGROUND_CONTEXT;
