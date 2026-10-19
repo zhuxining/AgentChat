@@ -8,12 +8,12 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
-import { cn } from "cn";
 import { PanelLeftIcon, SparklesIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePanelRef } from "react-resizable-panels";
+import { useShallow } from "zustand/react/shallow";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
+import { useRunnerCatalog, useConversationSnapshot } from "@/app/runner-queries";
 import { useWorkspaceUi } from "@/app/workspace-ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +27,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { BotDetailsPage } from "@/features/bots/bot-details-page";
 import { BotDetailsPane } from "@/features/bots/bot-details-pane";
 import { BotList } from "@/features/bots/bot-list";
+import { useRouteBotId } from "@/features/bots/bot-queries";
 import { NewBotPage } from "@/features/bots/new-bot-page";
 import { useBotSummaries } from "@/features/bots/use-bot-summaries";
 import { ChatView } from "@/features/chat/chat-view";
@@ -37,37 +38,52 @@ import { RunnerSettings } from "@/features/settings/runner-settings";
 import { SettingsLayout } from "@/features/settings/settings-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
-// The collapsed Bot rail stays visible as a narrow gutter, matching the reference layout.
-const botListCollapsedSize = 52;
+// A fully collapsed Bot list gives the chat area the whole remaining width.
+const botListCollapsedSize = 0;
 
 // Desktop is a resizable three-pane workspace: the Bot list and the details pane are
 // panels the reader can drag or push away. Below that width the same views become pages.
 function WorkspaceShell() {
-  const workspace = useWorkspaceContext();
+  const { data: catalog, isPending: loading } = useRunnerCatalog();
+  const selectedBotId = useRouteBotId();
+  const conversationId =
+    catalog?.conversations
+      .filter((item) => item.botId === selectedBotId)
+      .sort((left, right) => right.createdAt - left.createdAt || right.id - left.id)[0]?.id ?? null;
   const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const {
-    botSearch,
-    setBotSearch,
-    botListOpen,
-    setBotListOpen,
-    toggleBotList,
-    detailsOpen,
-    detailsAnimating,
-  } = useWorkspaceUi();
+  const { botSearch, setBotSearch, botListOpen, setBotListOpen, toggleBotList, detailsOpen } =
+    useWorkspaceUi(
+      useShallow((state) => ({
+        botSearch: state.botSearch,
+        setBotSearch: state.setBotSearch,
+        botListOpen: state.botListOpen,
+        setBotListOpen: state.setBotListOpen,
+        toggleBotList: state.toggleBotList,
+        detailsOpen: state.detailsOpen,
+      })),
+    );
+  const detailsElement = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = detailsElement.current;
+    element?.classList.add("transition-all", "duration-200", "ease-soft");
+    const timer = window.setTimeout(
+      () => element?.classList.remove("transition-all", "duration-200", "ease-soft"),
+      260,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      element?.classList.remove("transition-all", "duration-200", "ease-soft");
+    };
+  }, [detailsOpen]);
   const botListPanelRef = usePanelRef();
   const detailsPanelRef = usePanelRef();
   const chatMatch = matchRoute({ to: "/bots/$botId", fuzzy: false });
   const newBotMatch = matchRoute({ to: "/bots/new" });
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
   const isChatRoute = Boolean(chatMatch) && !newBotMatch;
-  const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
-    conversationId: workspace.selection.conversationId,
-    latestMessage:
-      workspace.selection.snapshot?.messages.filter((message) => message.text).at(-1)?.text ?? "",
-    executing: workspace.conversation.executing,
-  });
+  const summaries = useBotSummaries(catalog?.bots ?? [], catalog?.conversations ?? []);
   useEffect(() => {
     const panel = botListPanelRef.current;
     if (!panel || settingsMatch) return;
@@ -84,15 +100,15 @@ function WorkspaceShell() {
     const panel = detailsPanelRef.current;
     if (!panel) return;
     try {
-      if (detailsOpen) panel.expand();
+      if (detailsOpen && isChatRoute) panel.expand();
       else panel.collapse();
     } catch {
       // The group has no measurable layout yet (first paint without a layout engine);
       // the next toggle still works because the state stays the source of truth.
     }
-  }, [detailsOpen, isChatRoute, detailsPanelRef]);
+  }, [detailsOpen, isChatRoute, detailsPanelRef, settingsMatch]);
 
-  if (workspace.connection.loading) {
+  if (loading) {
     return (
       <main className="text-muted-foreground grid h-full place-items-center text-sm">
         正在打开 Runner…
@@ -102,41 +118,49 @@ function WorkspaceShell() {
   if (!isDesktop) {
     return (
       <main className="bg-background text-foreground flex h-full min-h-0 overflow-hidden">
+        <LiveConversationPoll conversationId={conversationId} />
         <Outlet />
       </main>
     );
   }
   const botList = (
     <BotList
-      bots={workspace.catalog.bots}
-      selectedBotId={workspace.selection.selectedBotId}
+      bots={catalog?.bots ?? []}
+      selectedBotId={selectedBotId}
       summaries={summaries}
       search={botSearch}
-      busy={workspace.connection.busy}
+      busy={false}
       onSearchChange={setBotSearch}
       onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
       onNewBot={() => void navigate({ to: "/bots/new" })}
       onToggleSidebar={toggleBotList}
       onSettings={() =>
-        void navigate({ to: "/settings/$section", params: { section: "provider" } })
+        void navigate({
+          to: "/settings/$section",
+          params: { section: "provider" },
+          search: { returnBotId: selectedBotId || undefined },
+        })
       }
     />
   );
   return (
-    <main className="bg-background text-foreground relative flex h-full min-h-0 overflow-hidden">
+    <main
+      data-bot-list-closed={!settingsMatch && !botListOpen ? "true" : undefined}
+      className="bg-background text-foreground relative flex h-full min-h-0 overflow-hidden"
+    >
+      <LiveConversationPoll conversationId={conversationId} />
       {!settingsMatch && !botListOpen && (
-        <div className="pointer-events-none absolute top-4 right-4 z-30">
-          <Button
-            aria-label="展开 Bot 侧栏"
-            title="展开 Bot 侧栏"
-            variant="ghost"
-            size="icon-sm"
-            className="pointer-events-auto"
-            onClick={toggleBotList}
-          >
-            <PanelLeftIcon />
-          </Button>
-        </div>
+        <Button
+          data-bot-list-reopen
+          aria-label="展开 Bot 侧栏"
+          title="展开 Bot 侧栏"
+          variant="ghost"
+          size="icon-sm"
+          aria-expanded={botListOpen}
+          onClick={toggleBotList}
+        >
+          <PanelLeftIcon />
+        </Button>
       )}
       <ResizablePanelGroup>
         {!settingsMatch && (
@@ -167,7 +191,7 @@ function WorkspaceShell() {
         <ResizablePanel id="main" minSize={360} className="flex min-h-0 flex-col overflow-hidden">
           <Outlet />
         </ResizablePanel>
-        {isChatRoute && (
+        {!settingsMatch && (
           <>
             <ResizableHandle className="after:w-2" />
             <ResizablePanel
@@ -179,12 +203,10 @@ function WorkspaceShell() {
               minSize={260}
               maxSize={560}
               groupResizeBehavior="preserve-pixel-size"
-              className={cn(
-                "overflow-hidden",
-                detailsAnimating && "transition-all duration-200 ease-soft",
-              )}
+              elementRef={detailsElement}
+              className="overflow-hidden motion-reduce:transition-none"
             >
-              <BotDetailsPane />
+              {isChatRoute && <BotDetailsPane />}
             </ResizablePanel>
           </>
         )}
@@ -193,49 +215,54 @@ function WorkspaceShell() {
   );
 }
 
-const rootRoute = createRootRoute({ component: WorkspaceShell });
-
-// Route and workspace agree on which Bot is open; the workspace stays the data owner.
-function useRouteBot(botId: string) {
-  const workspace = useWorkspaceContext();
-  const selectedBotId = workspace.selection.selectedBotId;
-  useEffect(() => {
-    if (botId && selectedBotId !== botId) workspace.actions.selectBot(botId);
-  }, [botId, selectedBotId, workspace.actions]);
+function LiveConversationPoll({ conversationId }: { conversationId: number | null }) {
+  useConversationSnapshot(conversationId, true);
+  return null;
 }
+
+const rootRoute = createRootRoute({ component: WorkspaceShell });
 
 function ChatPage() {
   const { botId } = useParams({ from: "/bots/$botId" });
-  useRouteBot(botId);
   return <ChatView botId={botId} />;
 }
 
 function BotDetailsRoute() {
   const { botId } = useParams({ from: "/bots/$botId/details" });
-  useRouteBot(botId);
   return <BotDetailsPage botId={botId} />;
 }
 
 function SettingsSectionPage() {
   const { section } = useParams({ from: "/settings/$section" });
-  if (section === "provider") return <ProviderSettings />;
-  if (section === "runner") return <RunnerSettings />;
-  if (section === "about") return <AboutSettings />;
-  return <GeneralSettings />;
+  // Every section stays mounted so unsaved drafts survive switching categories; leaving
+  // settings unmounts all of them, which is what clears the credential draft.
+  return (
+    <>
+      <div hidden={section !== "general"}>
+        <GeneralSettings />
+      </div>
+      <div hidden={section !== "provider"}>
+        <ProviderSettings />
+      </div>
+      <div hidden={section !== "runner"}>
+        <RunnerSettings />
+      </div>
+      <div hidden={section !== "about"}>
+        <AboutSettings />
+      </div>
+    </>
+  );
 }
 
 // The Bot list is the workspace's own left pane on desktop and the index page below it.
 function BotsIndexPage() {
-  const workspace = useWorkspaceContext();
+  const { data: catalog } = useRunnerCatalog();
   const navigate = useNavigate();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { botSearch, setBotSearch } = useWorkspaceUi();
-  const summaries = useBotSummaries(workspace.catalog.bots, workspace.catalog.conversations, {
-    conversationId: workspace.selection.conversationId,
-    latestMessage:
-      workspace.selection.snapshot?.messages.filter((message) => message.text).at(-1)?.text ?? "",
-    executing: workspace.conversation.executing,
-  });
+  const { botSearch, setBotSearch } = useWorkspaceUi(
+    useShallow((state) => ({ botSearch: state.botSearch, setBotSearch: state.setBotSearch })),
+  );
+  const summaries = useBotSummaries(catalog?.bots ?? [], catalog?.conversations ?? []);
   return (
     <>
       {!isDesktop && (
@@ -244,11 +271,11 @@ function BotsIndexPage() {
           className="bg-sidebar animate-fade-in flex h-full min-h-0 flex-1 flex-col"
         >
           <BotList
-            bots={workspace.catalog.bots}
-            selectedBotId={workspace.selection.selectedBotId}
+            bots={catalog?.bots ?? []}
+            selectedBotId=""
             summaries={summaries}
             search={botSearch}
-            busy={workspace.connection.busy}
+            busy={false}
             onSearchChange={setBotSearch}
             onSelect={(botId) => void navigate({ to: "/bots/$botId", params: { botId } })}
             onNewBot={() => void navigate({ to: "/bots/new" })}
@@ -307,6 +334,9 @@ const botDetailsRoute = createRoute({
 const settingsIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
+  validateSearch: (search: Record<string, unknown>): { returnBotId?: string } => ({
+    returnBotId: typeof search.returnBotId === "string" ? search.returnBotId : undefined,
+  }),
   component: SettingsLayout,
 });
 

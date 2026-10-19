@@ -14,6 +14,19 @@ export function BotModelSelect({
   onChange: (provider: string, modelId: string) => void;
 }) {
   const value = JSON.stringify([provider, modelId]);
+  // Older backgrounds do not report a provider catalog; keep their single current
+  // reference readable instead of exposing the composite option encoding.
+  if (providers.length === 0)
+    return (
+      <select
+        aria-label="模型"
+        className="bg-background text-foreground h-9 w-full rounded-md border px-2 text-sm"
+        value={modelId}
+        disabled
+      >
+        <option value={modelId}>{modelId}</option>
+      </select>
+    );
   const currentVisible = providers.some(
     (item) => item.name === provider && item.models.includes(modelId),
   );

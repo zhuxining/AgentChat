@@ -22,10 +22,9 @@ vi.mock("../../src/app/runner-client", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn<typeof openUrl>(async () => undefined),
 }));
-vi.mock("../../src/app/workspace-provider", () => ({
-  useWorkspaceContext: () => ({
+vi.mock("../../src/features/settings/use-runner-actions", () => ({
+  useRunnerSettings: () => ({
     connection: { busy: false },
-    conversation: { hasLiveTasks: true },
     actions: { restartRunner },
     feedback: { error: "" },
   }),
@@ -267,7 +266,7 @@ it("marks tests stale when editing and requires confirmation before restarting a
   fireEvent.click(screen.getByRole("button", { name: "保存接入" }));
   fireEvent.click(await screen.findByRole("button", { name: "重启后台并应用" }));
   const dialog = within(await screen.findByRole("dialog", { name: "重新启动后台" }));
-  expect(dialog.getByText(/当前对话仍有任务/)).toBeTruthy();
+  expect(dialog.getByText(/重启可能中断正在执行的工作/)).toBeTruthy();
   expect(restartRunner).not.toHaveBeenCalled();
   fireEvent.click(dialog.getByRole("button", { name: "确认重新启动" }));
   await waitFor(() => expect(restartRunner).toHaveBeenCalledTimes(1));

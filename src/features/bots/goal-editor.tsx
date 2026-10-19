@@ -1,10 +1,10 @@
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useBotChat } from "@/features/chat/use-bot-chat";
 
 // Validates nothing itself: the workspace keeps the draft and owns save/complete semantics.
 export function GoalEditor() {
-  const { selection, connection, conversation, actions } = useWorkspaceContext();
+  const { selection, connection, conversation, actions, operationError } = useBotChat();
   const snapshot = selection.snapshot;
   if (!snapshot) return null;
   return (
@@ -15,6 +15,11 @@ export function GoalEditor() {
         void actions.saveGoal();
       }}
     >
+      {operationError && (
+        <p role="alert" className="text-destructive text-sm">
+          {operationError}
+        </p>
+      )}
       <Textarea
         aria-label="工作目标"
         placeholder="记录这次聊天要完成的工作"

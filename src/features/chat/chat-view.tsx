@@ -1,5 +1,4 @@
 import { useNavigate } from "@tanstack/react-router";
-import { cn } from "cn";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -8,10 +7,10 @@ import {
   SparklesIcon,
   SquareIcon,
 } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
+import { useShallow } from "zustand/react/shallow";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { useWorkspaceUi } from "@/app/workspace-ui";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -41,6 +40,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
+import { useBotChat } from "@/features/chat/use-bot-chat";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
 import { useMarkdownPlugins } from "@/features/chat/use-markdown-plugins";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -52,34 +52,65 @@ function rowId(conversationId: number, messageId: number) {
 }
 
 export function ChatView({ botId }: { botId: string }) {
-  const workspace = useWorkspaceContext();
-  const { selection, connection, feedback, messaging, conversation, actions } = workspace;
+  const workspace = useBotChat();
+  const { selection, connection, feedback, messaging, actions } = workspace;
   const navigate = useNavigate();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { detailsOpen, toggleDetails, botListOpen } = useWorkspaceUi();
-  const segments = useBotTimeline(selection.botConversations, {
-    id: selection.conversationId,
-    snapshot: selection.snapshot,
-  });
+  const { detailsOpen, toggleDetails, botListOpen } = useWorkspaceUi(
+    useShallow((state) => ({
+      detailsOpen: state.detailsOpen,
+      toggleDetails: state.toggleDetails,
+      botListOpen: state.botListOpen,
+    })),
+  );
+  const segments = useBotTimeline(selection.botConversations);
   const markdownPlugins = useMarkdownPlugins(
     segments.flatMap((segment) => segment.snapshot.messages.map((message) => message.text)),
   );
-  // Only the newest turn animates: replaying entrances for a loaded history would make the
-  // transcript ripple every time it opens.
+  // Only a row that arrives while its Conversation is on screen animates; loading a
+  // transcript or switching Bots must not replay entrances for existing history.
   const latestSegment = segments.at(-1);
   const latestMessage = latestSegment?.snapshot.messages
     .filter((message) => message.text && (message.role === "user" || message.role === "assistant"))
     .at(-1);
   const latestRowId =
     latestSegment && latestMessage ? rowId(latestSegment.conversation.id, latestMessage.id) : null;
+  const snapshot = selection.snapshot;
+  const snapshotUnavailable =
+    selection.conversationId !== null &&
+    snapshot === null &&
+    (Boolean(selection.snapshotError) || connection.runnerUnavailable);
+  const snapshotLoading =
+    selection.conversationId !== null && snapshot === null && !snapshotUnavailable;
+  const hasLiveTasks = (snapshot?.activeTasks.length ?? 0) > 0;
+  const executing = snapshot?.activeTasks.some((task) => task.status === "running") ?? false;
+  const [animatedRowId, setAnimatedRowId] = useState<string | null>(null);
+  const previousLatestRef = useRef<{ conversationId: number | null; rowId: string | null }>({
+    conversationId: null,
+    rowId: null,
+  });
+  useLayoutEffect(() => {
+    const conversationId = selection.conversationId;
+    if (conversationId === null || !snapshot) return;
+    const previous = previousLatestRef.current;
+    if (previous.conversationId !== conversationId) {
+      setAnimatedRowId(null);
+    } else if (latestRowId && latestRowId !== previous.rowId) {
+      setAnimatedRowId(latestRowId);
+    }
+    previousLatestRef.current = { conversationId, rowId: latestRowId };
+  }, [latestRowId, selection.conversationId, snapshot]);
   const hasConversation = selection.conversationId !== null;
-  const executionStatus = conversation.executing
-    ? "执行中"
-    : conversation.hasLiveTasks
-      ? "等待中"
-      : "空闲";
-  const model =
-    selection.snapshot?.conversation.agent.model?.modelId ?? selection.activeBot?.model.modelId;
+  const executionStatus = snapshot
+    ? executing
+      ? "执行中"
+      : hasLiveTasks
+        ? "等待中"
+        : "空闲"
+    : snapshotUnavailable
+      ? "读取失败"
+      : "正在加载";
+  const model = snapshot?.conversation.agent.model?.modelId ?? selection.activeBot?.model.modelId;
   return (
     <section
       aria-label="聊天内容"
@@ -87,10 +118,8 @@ export function ChatView({ botId }: { botId: string }) {
     >
       <header
         data-window-titlebar
-        className={cn(
-          "flex h-16 shrink-0 items-center gap-2 border-b px-3 md:px-4",
-          !botListOpen && "md:pr-14",
-        )}
+        data-window-titlebar-leading={!botListOpen || undefined}
+        className="flex h-14 shrink-0 items-center gap-2 px-3 md:px-4"
       >
         <Button
           aria-label="返回 Bot 列表"
@@ -110,7 +139,7 @@ export function ChatView({ botId }: { botId: string }) {
             {hasConversation ? ` · ${executionStatus}` : ""}
           </p>
         </div>
-        {conversation.hasLiveTasks && (
+        {hasLiveTasks && (
           <Button
             disabled={connection.busy}
             size="sm"
@@ -163,7 +192,11 @@ export function ChatView({ botId }: { botId: string }) {
             variant="ghost"
             size="sm"
             onClick={() =>
-              void navigate({ to: "/settings/$section", params: { section: "provider" } })
+              void navigate({
+                to: "/settings/$section",
+                params: { section: "provider" },
+                search: { returnBotId: botId },
+              })
             }
           >
             配置密钥
@@ -174,7 +207,7 @@ export function ChatView({ botId }: { botId: string }) {
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport className="px-5">
             <MessageScrollerContent
-              aria-busy={conversation.hasLiveTasks}
+              aria-busy={hasLiveTasks || snapshotLoading}
               className="mx-auto w-full max-w-3xl py-6"
             >
               {segments.map((segment, index) => (
@@ -198,7 +231,7 @@ export function ChatView({ botId }: { botId: string }) {
                         key={rowId(segment.conversation.id, message.id)}
                         messageId={rowId(segment.conversation.id, message.id)}
                         className={
-                          rowId(segment.conversation.id, message.id) === latestRowId
+                          rowId(segment.conversation.id, message.id) === animatedRowId
                             ? message.role === "user"
                               ? "animate-message-in-end"
                               : "animate-message-in"
@@ -217,13 +250,13 @@ export function ChatView({ botId }: { botId: string }) {
                               <Streamdown
                                 mode={
                                   rowId(segment.conversation.id, message.id) === latestRowId &&
-                                  conversation.hasLiveTasks
+                                  hasLiveTasks
                                     ? "streaming"
                                     : "static"
                                 }
                                 isAnimating={
                                   rowId(segment.conversation.id, message.id) === latestRowId &&
-                                  conversation.hasLiveTasks
+                                  hasLiveTasks
                                 }
                                 animated={false}
                                 plugins={markdownPlugins}
@@ -267,7 +300,25 @@ export function ChatView({ botId }: { botId: string }) {
                   </Empty>
                 </MessageScrollerItem>
               )}
+              {snapshotLoading && (
+                <MessageScrollerItem messageId="loading-conversation">
+                  <Marker role="status" aria-label="正在加载会话">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent>正在加载会话…</MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
+              {snapshotUnavailable && (
+                <MessageScrollerItem messageId="unavailable-conversation">
+                  <Marker role="status" aria-label="无法加载会话">
+                    <MarkerContent>当前会话暂时无法加载。</MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
               {hasConversation &&
+                snapshot &&
                 segments.every((segment) => segment.snapshot.messages.length === 0) && (
                   <MessageScrollerItem messageId="empty-conversation">
                     <Empty className="animate-fade-in min-h-40">
@@ -288,7 +339,7 @@ export function ChatView({ botId }: { botId: string }) {
                   </Marker>
                 </MessageScrollerItem>
               )}
-              {selection.snapshot?.submissions
+              {snapshot?.submissions
                 .filter((submission) => submission.status === "queued")
                 .map((submission) => (
                   <MessageScrollerItem
@@ -312,14 +363,14 @@ export function ChatView({ botId }: { botId: string }) {
                     </Marker>
                   </MessageScrollerItem>
                 ))}
-              {conversation.hasLiveTasks && (
+              {hasLiveTasks && (
                 <MessageScrollerItem messageId="status:running">
                   <Marker role="status" className="animate-fade-in">
                     <MarkerIcon>
                       <Spinner />
                     </MarkerIcon>
                     <MarkerContent className="shimmer">
-                      {conversation.executing ? "正在思考与执行…" : "等待处理…"}
+                      {executing ? "正在思考与执行…" : "等待处理…"}
                     </MarkerContent>
                   </Marker>
                 </MessageScrollerItem>
@@ -348,7 +399,7 @@ export function ChatView({ botId }: { botId: string }) {
               connection.busy ||
               connection.runnerUnavailable ||
               !connection.ready ||
-              messaging.pendingSubmission !== null
+              messaging.pendingSubmission?.conversationId === selection.conversationId
             }
             placeholder={`发送消息给 ${selection.activeBot?.name ?? "Bot"}`}
             value={messaging.input}
@@ -373,6 +424,7 @@ export function ChatView({ botId }: { botId: string }) {
                 connection.runnerUnavailable ||
                 !connection.ready ||
                 !messaging.input.trim() ||
+                messaging.submitting ||
                 (messaging.pendingSubmission !== null &&
                   messaging.pendingSubmission.conversationId !== selection.conversationId)
               }

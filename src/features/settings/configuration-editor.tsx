@@ -1,12 +1,12 @@
 import { useState } from "react";
 
 import type { ConfigurationFile } from "@/app/runner-client";
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useRunnerActions } from "@/features/settings/use-runner-actions";
 
 export function ConfigurationEditor({ files, disabled }: { files: string[]; disabled: boolean }) {
-  const { actions } = useWorkspaceContext();
+  const actions = useRunnerActions();
   const [path, setPath] = useState(files[0] ?? "");
   const [loaded, setLoaded] = useState<ConfigurationFile | null>(null);
   const [content, setContent] = useState("");
@@ -16,6 +16,7 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
   const canSave = loaded?.path === path && canRead && content !== loaded.content;
 
   async function read() {
+    actions.clearError();
     setPending(true);
     setError("");
     try {
@@ -107,9 +108,9 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
         JSON 配置中的凭据只填写 credentialRef 引用。API 密钥请使用 Provider
         页面的安全保存入口。保存并重载后的 Bot 配置用于后续执行；已有执行需显式应用。
       </p>
-      {error && (
+      {(actions.error || error) && (
         <p role="alert" className="text-destructive text-sm">
-          {error}
+          {actions.error || error}
         </p>
       )}
     </div>

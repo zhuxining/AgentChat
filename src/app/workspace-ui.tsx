@@ -1,55 +1,38 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 
 type WorkspaceUi = {
   botSearch: string;
-  setBotSearch: (value: string) => void;
   detailsOpen: boolean;
-  detailsAnimating: boolean;
   botListOpen: boolean;
+  setBotSearch: (value: string) => void;
   setBotListOpen: (open: boolean) => void;
   toggleBotList: () => void;
   toggleDetails: () => void;
 };
 
-const WorkspaceUiContext = createContext<WorkspaceUi | null>(null);
-
-// Client-side workspace UI state that survives layout and page changes: the Bot search
-// query, the visibility of the Bot list and details panels.
-export function WorkspaceUiProvider({ children }: { children: ReactNode }) {
-  const [botSearch, setBotSearch] = useState("");
-  const [detailsOpen, setDetailsOpen] = useState(true);
-  const [detailsAnimating, setDetailsAnimating] = useState(false);
-  const [botListOpen, setBotListOpen] = useState(true);
-  function toggleBotList() {
-    setBotListOpen((open) => !open);
-  }
-  // The panel only transitions for the programmatic toggle; dragging its handle stays
-  // immediate, so the flag is cleared once the collapse/expand has finished.
-  function toggleDetails() {
-    setDetailsAnimating(true);
-    setDetailsOpen((open) => !open);
-    window.setTimeout(() => setDetailsAnimating(false), 260);
-  }
-  return (
-    <WorkspaceUiContext.Provider
-      value={{
-        botSearch,
-        setBotSearch,
-        detailsOpen,
-        detailsAnimating,
-        botListOpen,
-        setBotListOpen,
-        toggleBotList,
-        toggleDetails,
-      }}
-    >
-      {children}
-    </WorkspaceUiContext.Provider>
-  );
+export function createWorkspaceUiStore() {
+  return createStore<WorkspaceUi>()((set) => ({
+    botSearch: "",
+    detailsOpen: true,
+    botListOpen: true,
+    setBotSearch: (botSearch) => set({ botSearch }),
+    setBotListOpen: (botListOpen) => set({ botListOpen }),
+    toggleBotList: () => set((state) => ({ botListOpen: !state.botListOpen })),
+    toggleDetails: () => set((state) => ({ detailsOpen: !state.detailsOpen })),
+  }));
 }
 
-export function useWorkspaceUi(): WorkspaceUi {
-  const value = useContext(WorkspaceUiContext);
-  if (!value) throw new Error("useWorkspaceUi 必须在 WorkspaceUiProvider 内使用");
-  return value;
+const WorkspaceUiContext = createContext<ReturnType<typeof createWorkspaceUiStore> | null>(null);
+
+export function WorkspaceUiProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(createWorkspaceUiStore);
+  return <WorkspaceUiContext.Provider value={store}>{children}</WorkspaceUiContext.Provider>;
+}
+
+export function useWorkspaceUi<T>(selector: (state: WorkspaceUi) => T): T {
+  const store = useContext(WorkspaceUiContext);
+  if (!store) throw new Error("useWorkspaceUi 必须在 WorkspaceUiProvider 内使用");
+  return useStore(store, selector);
 }

@@ -1,12 +1,12 @@
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { InfoRow } from "@/components/ui/inspector-section";
 import { ConfigurationEditor } from "@/features/settings/configuration-editor";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
+import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
 export function RunnerSettings() {
-  const { catalog, connection, feedback, actions } = useWorkspaceContext();
-  const configuration = catalog.configuration;
+  const { catalog, connection, feedback, actions } = useRunnerSettings();
+  const configuration = catalog?.configuration;
   return (
     <div className="space-y-6">
       <SettingsSectionCard title="后台运行状态">

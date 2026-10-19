@@ -1,10 +1,13 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { runnerClient } from "@/app/runner-client";
+import { runnerKeys } from "@/app/runner-queries";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 
 export function RuntimeGate({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState<"checking" | "installing" | "starting" | "ready" | "failed">(
     "checking",
@@ -33,7 +36,12 @@ export function RuntimeGate({ children }: { children: ReactNode }) {
       setPhase("starting");
       setMessage("Node 已就绪，正在启动后台 Runner…");
       await runnerClient.startRunner();
-      await runnerClient.initialize();
+      await queryClient.fetchQuery({
+        queryKey: runnerKeys.catalog,
+        queryFn: () => runnerClient.initialize(),
+        staleTime: Infinity,
+        retry: false,
+      });
     }
 
     const task = initialization.current ?? (initialization.current = initialize());
@@ -50,7 +58,7 @@ export function RuntimeGate({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [attempt]);
+  }, [attempt, queryClient]);
 
   if (phase === "ready") return <>{children}</>;
 

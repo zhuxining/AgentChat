@@ -1,5 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.agentchat.app",
   "app": {
     "windows": [
       {
@@ -10,7 +11,11 @@
         "minHeight": 600,
         "decorations": true,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 19,
+          "y": 28
+        }
       }
     ]
   }

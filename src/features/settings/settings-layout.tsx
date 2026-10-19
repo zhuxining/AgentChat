@@ -1,8 +1,8 @@
-import { Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeftIcon, CpuIcon, InfoIcon, KeyRoundIcon, PaletteIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
+import { useRunnerCatalog } from "@/app/runner-queries";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -24,11 +24,14 @@ export function SettingsLayout() {
       ? (sectionMatch.section as string)
       : null;
   const active = settingsSections.find((item) => item.id === activeSection);
-  const { selection } = useWorkspaceContext();
+  const { returnBotId } = useSearch({ from: "/settings" });
+  const { data: catalog } = useRunnerCatalog();
 
   // Back always targets the workspace, not the previous settings page.
   function leaveSettings() {
-    const botId = selection.selectedBotId;
+    const botId = catalog?.bots.some((bot) => bot.id === returnBotId && !bot.archived)
+      ? returnBotId
+      : undefined;
     if (botId) void navigate({ to: "/bots/$botId", params: { botId } });
     else void navigate({ to: "/" });
   }
@@ -45,7 +48,7 @@ export function SettingsLayout() {
         <header
           data-window-titlebar
           data-window-titlebar-leading
-          className="flex h-16 shrink-0 items-center px-4"
+          className="flex h-14 shrink-0 items-center px-4"
         >
           <span className="font-semibold" data-window-drag-region>
             设置
@@ -61,7 +64,11 @@ export function SettingsLayout() {
                 active?.id === item.id && "bg-accent",
               )}
               onClick={() =>
-                void navigate({ to: "/settings/$section", params: { section: item.id } })
+                void navigate({
+                  to: "/settings/$section",
+                  params: { section: item.id },
+                  search: { returnBotId },
+                })
               }
             >
               <item.icon className="size-4" />
@@ -84,23 +91,27 @@ export function SettingsLayout() {
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !active && "hidden md:flex")}>
         <header
           data-window-titlebar
-          className="flex h-16 shrink-0 items-center gap-2 border-b px-4"
+          className="flex h-14 shrink-0 items-center gap-2 border-b px-4"
         >
           <Button
             aria-label="返回设置分类"
             variant="ghost"
             size="icon-sm"
             className="md:hidden"
-            onClick={() => void navigate({ to: "/settings" })}
+            onClick={() => void navigate({ to: "/settings", search: { returnBotId } })}
           >
             <ChevronLeftIcon />
           </Button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-window-drag-region>
+          <h1
+            key={active?.id ?? "index"}
+            className="animate-fade-in min-w-0 flex-1 truncate text-sm font-semibold"
+            data-window-drag-region
+          >
             {active ? active.label : "设置"}
           </h1>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div key={active?.id ?? "index"} className="animate-fade-in mx-auto max-w-2xl space-y-6">
+          <div className="animate-fade-in mx-auto max-w-2xl space-y-6">
             {active ? (
               <Outlet />
             ) : (

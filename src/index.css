@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
 @import "tw-shimmer";
 @import "@fontsource-variable/inter";
 @import "streamdown/styles.css";
@@ -268,6 +267,17 @@ html[data-platform="macos"] [data-window-titlebar-leading] {
   html[data-platform="macos"] [data-window-titlebar] {
     padding-inline-start: var(--window-titlebar-leading-inset);
   }
+}
+
+[data-bot-list-reopen] {
+  position: absolute;
+  z-index: 30;
+  top: 12px;
+  inset-inline-start: var(--window-titlebar-leading-inset, 0px);
+}
+
+main[data-bot-list-closed] [data-window-titlebar] {
+  padding-inline-start: calc(var(--window-titlebar-leading-inset, 0px) + 40px);
 }
 
 [data-window-drag-region] {

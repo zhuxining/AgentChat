@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ProviderInstance } from "@/app/runner-client";
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { ProviderDetail } from "@/features/settings/provider-detail";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
 import { providerError, providerQueryKey, useProviders } from "@/features/settings/use-providers";
+import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
 import type { ProviderCatalogEntry, ProviderTestResult } from "../../../contracts/providers";
 
@@ -50,7 +50,7 @@ function newInstance(entry: ProviderCatalogEntry): ProviderInstance {
 }
 
 export function ProviderSettings() {
-  const { connection, conversation, actions, feedback } = useWorkspaceContext();
+  const { connection, actions, feedback } = useRunnerSettings();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -224,10 +224,8 @@ export function ProviderSettings() {
           <DialogHeader>
             <DialogTitle>重新启动后台</DialogTitle>
             <DialogDescription>
-              {conversation.hasLiveTasks
-                ? "当前对话仍有任务，重启会中断正在执行的工作。"
-                : "其他 Bot 可能仍有任务，重启可能中断正在执行的工作。"}
-              未完成工作将保留恢复状态，请确认重启时机。
+              其他 Bot
+              可能仍有任务，重启可能中断正在执行的工作。未完成工作将保留恢复状态，请确认重启时机。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
