@@ -123,6 +123,7 @@
 
 /* Flexoki color system — source of truth: docs/design.pen */
 :root {
+  color-scheme: light;
   --paper: #fffcf0;
   --flexoki-bg: #f2f0e5;
   --flexoki-bg-2: #e6e4d9;
@@ -172,6 +173,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --paper: #100f0f;
   --flexoki-bg: #1c1b1a;
   --flexoki-bg-2: #282726;

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { createAppRouter } from "@/app/router";
 import { RuntimeGate } from "@/app/runtime-gate";
+import { ThemeProvider } from "@/app/theme";
 import { WorkspaceProvider } from "@/app/workspace-provider";
 import { WorkspaceUiProvider } from "@/app/workspace-ui";
 
@@ -46,12 +47,14 @@ export default function App() {
   }, []);
 
   return (
-    <RuntimeGate>
-      <WorkspaceProvider>
-        <WorkspaceUiProvider>
-          <RouterProvider router={router} />
-        </WorkspaceUiProvider>
-      </WorkspaceProvider>
-    </RuntimeGate>
+    <ThemeProvider>
+      <RuntimeGate>
+        <WorkspaceProvider>
+          <WorkspaceUiProvider>
+            <RouterProvider router={router} />
+          </WorkspaceUiProvider>
+        </WorkspaceProvider>
+      </RuntimeGate>
+    </ThemeProvider>
   );
 }

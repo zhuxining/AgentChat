@@ -12,7 +12,6 @@ import { useShallow } from "zustand/react/shallow";
 
 import { useWorkspaceUi } from "@/app/workspace-ui";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
