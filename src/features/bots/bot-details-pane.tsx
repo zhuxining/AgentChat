@@ -10,7 +10,7 @@ export function BotDetailsPane() {
         <h2 className="text-sm font-medium">Bot 详情</h2>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <BotDetailsView showFeedback={false} />
+        <BotDetailsView />
       </div>
     </aside>
   );

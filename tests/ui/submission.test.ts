@@ -13,6 +13,8 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 
 vi.mock("../../src/app/runner-client", () => ({
   runnerClient: {
+    runtimeStatus: vi.fn<typeof runnerClient.runtimeStatus>(),
+    startRunner: vi.fn<typeof runnerClient.startRunner>(),
     updateBot: vi.fn<typeof runnerClient.updateBot>(),
     archiveBot: vi.fn<typeof runnerClient.archiveBot>(),
     reloadConfiguration: vi.fn<typeof runnerClient.reloadConfiguration>(),
@@ -37,6 +39,15 @@ vi.mock("../../src/app/runner-client", () => ({
 
 // happy-dom 不解析媒体查询，布局判断需要显式桩；默认按桌面宽度运行。
 beforeEach(() => {
+  vi.mocked(runnerClient.runtimeStatus).mockResolvedValue({
+    status: "ready",
+    path: "/test/node",
+    version: "v24.0.0",
+    source: "system",
+    architecture: "arm64",
+    detail: null,
+  });
+  vi.mocked(runnerClient.startRunner).mockResolvedValue(undefined);
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query.includes("min-width"),
     media: query,
@@ -130,13 +141,14 @@ function renderApp() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   });
-  return render(
+  const view = render(
     createElement(
       QueryClientProvider,
       { client: queryClient },
       createElement(TooltipProvider, null, createElement(App)),
     ),
   );
+  return { ...view, queryClient };
 }
 
 // The list is always present in the shell; opening a Bot is the only way into a chat.
@@ -555,6 +567,7 @@ it("preserves a raw config draft on conflict and saves with the freshly read ver
   );
   fireEvent.click(within(settings).getByRole("button", { name: "重新读取配置" }));
   await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe('{"name":"外部修改"}'));
+  expect(within(settings).queryByText("配置已被外部修改，请刷新后重试")).toBeNull();
   fireEvent.change(textarea, { target: { value: '{"name":"新名称"}' } });
   fireEvent.click(within(settings).getByRole("button", { name: "保存配置文件" }));
   await waitFor(() =>
@@ -682,4 +695,297 @@ it("keeps unsent input per Bot when switching Bots", async () => {
   expect(
     ((await screen.findByRole("textbox", { name: "发送消息" })) as HTMLTextAreaElement).value,
   ).toBe("给测试助手的草稿");
+});
+
+function mockTwoBots() {
+  vi.mocked(runnerClient.initialize).mockResolvedValue({
+    ...initialState,
+    bots: [...initialState.bots, { ...initialState.bots[0]!, id: "bot-2", name: "写作助手" }],
+    conversations: [
+      ...initialState.conversations,
+      { ...initialState.conversations[0]!, id: 55, botId: "bot-2", botName: "写作助手" },
+    ],
+  });
+  vi.mocked(runnerClient.snapshot).mockImplementation(async (id) => ({
+    ...initialSnapshot,
+    conversation: {
+      ...initialSnapshot.conversation,
+      id,
+      botId: id === 55 ? "bot-2" : "bot-1",
+      botName: id === 55 ? "写作助手" : "测试助手",
+    },
+  }));
+}
+
+it("settles a submission against its original Bot while preserving another Bot's draft", async () => {
+  mockTwoBots();
+  const submission = deferred<{ id: number }>();
+  vi.mocked(runnerClient.submit).mockReturnValue(submission.promise);
+  renderApp();
+  await openBot();
+  const input = await screen.findByRole("textbox", { name: "发送消息" });
+  fireEvent.change(input, { target: { value: "发给测试助手" } });
+  fireEvent.submit(input.closest("form")!);
+  await waitFor(() => expect(runnerClient.submit).toHaveBeenCalledTimes(1));
+  await openBot(/写作助手/);
+  const other = screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement;
+  expect(other.disabled).toBe(false);
+  fireEvent.change(other, { target: { value: "写作助手的新草稿" } });
+  await act(async () => submission.resolve({ id: 90 }));
+  await waitFor(() => expect(other.value).toBe("写作助手的新草稿"));
+  expect(runnerClient.submit).toHaveBeenCalledWith(41, "发给测试助手", expect.any(String));
+  await openBot();
+  expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe("");
+});
+
+it("retains an uncertain request across navigation and retries with the same requestId", async () => {
+  mockTwoBots();
+  vi.mocked(runnerClient.submit)
+    .mockRejectedValueOnce(new Error("连接中断"))
+    .mockResolvedValueOnce({ id: 90 });
+  renderApp();
+  await openBot();
+  const input = screen.getByRole("textbox", { name: "发送消息" });
+  fireEvent.change(input, { target: { value: "只接纳一次" } });
+  fireEvent.submit(input.closest("form")!);
+  await screen.findByText(/接纳结果尚未确认/);
+  const first = vi.mocked(runnerClient.submit).mock.calls[0];
+  await openBot(/写作助手/);
+  const other = screen.getByRole("textbox", { name: "发送消息" });
+  fireEvent.change(other, { target: { value: "另一条输入" } });
+  fireEvent.submit(other.closest("form")!);
+  await screen.findByText(/上一条提交结果尚未确认/);
+  expect(runnerClient.submit).toHaveBeenCalledTimes(1);
+  await openBot();
+  fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Runner" }));
+  fireEvent.click(screen.getByRole("button", { name: "返回" }));
+  fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+  await waitFor(() => expect(runnerClient.submit).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(runnerClient.submit).mock.calls[1]).toEqual(first);
+  await waitFor(() =>
+    expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe(
+      "",
+    ),
+  );
+});
+
+it("shares snapshots between the Bot list, live chat and history without duplicate requests", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  const { queryClient } = renderApp();
+  await openBot();
+  await screen.findByRole("textbox", { name: "发送消息" });
+  expect(runnerClient.initialize).toHaveBeenCalledTimes(1);
+  expect(runnerClient.snapshot).toHaveBeenCalledTimes(1);
+  expect(
+    queryClient.getQueryCache().findAll({ queryKey: ["runner", "snapshot", 41] }),
+  ).toHaveLength(1);
+  expect(
+    queryClient
+      .getQueryCache()
+      .getAll()
+      .filter(
+        (query) =>
+          query.queryKey[0] === "bot-summary" || query.queryKey[0] === "conversation-timeline",
+      ),
+  ).toHaveLength(0);
+});
+
+it("discards old snapshots on restart and ignores late responses from the old Runner", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  const late = deferred<ConversationSnapshot>();
+  vi.mocked(runnerClient.snapshot)
+    .mockReturnValueOnce(late.promise)
+    .mockResolvedValue({
+      ...initialSnapshot,
+      messages: [{ id: 2, role: "assistant", text: "重启后的回复", truncated: false }],
+    });
+  vi.mocked(runnerClient.restartRunner).mockResolvedValue(undefined);
+  const { queryClient } = renderApp();
+  await openBot();
+  await waitFor(() => expect(runnerClient.snapshot).toHaveBeenCalledTimes(1));
+  const settings = await openRunnerSettings();
+  fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
+  await waitFor(() => expect(runnerClient.initialize).toHaveBeenCalledTimes(2));
+  await act(async () =>
+    late.resolve({
+      ...initialSnapshot,
+      messages: [{ id: 1, role: "assistant", text: "旧 Runner 的迟到回复", truncated: false }],
+    }),
+  );
+  expect(JSON.stringify(queryClient.getQueryData(["runner", "snapshot", 41]))).not.toContain(
+    "旧 Runner 的迟到回复",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "返回" }));
+  const chat = within(await screen.findByRole("region", { name: "聊天内容" }));
+  expect(await chat.findByText("重启后的回复")).toBeTruthy();
+  expect(chat.queryByText("旧 Runner 的迟到回复")).toBeNull();
+});
+
+it("does not refresh a stopped Runner when an earlier submission is acknowledged late", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  vi.mocked(runnerClient.stopRunner).mockResolvedValue(undefined);
+  const submission = deferred<{ id: number }>();
+  vi.mocked(runnerClient.submit).mockReturnValue(submission.promise);
+  renderApp();
+  await openBot();
+  const input = screen.getByRole("textbox", { name: "发送消息" });
+  fireEvent.change(input, { target: { value: "等待确认" } });
+  fireEvent.submit(input.closest("form")!);
+  await waitFor(() => expect(runnerClient.submit).toHaveBeenCalledTimes(1));
+  const settings = await openRunnerSettings();
+  fireEvent.click(within(settings).getByRole("button", { name: "停止后台 Runner" }));
+  await within(settings).findByText("后台已停止");
+  const calls = vi.mocked(runnerClient.snapshot).mock.calls.length;
+  await act(async () => submission.resolve({ id: 91 }));
+  expect(runnerClient.snapshot).toHaveBeenCalledTimes(calls);
+  expect(runnerClient.initialize).toHaveBeenCalledTimes(1);
+});
+
+it("ignores a Bot update from an earlier Runner generation", async () => {
+  vi.mocked(runnerClient.initialize)
+    .mockResolvedValueOnce(initialState)
+    .mockResolvedValue({
+      ...initialState,
+      bots: [{ ...initialState.bots[0]!, name: "重启后的名称", configVersion: "v3" }],
+    });
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  vi.mocked(runnerClient.restartRunner).mockResolvedValue(undefined);
+  const update = deferred<Awaited<ReturnType<typeof runnerClient.updateBot>>>();
+  vi.mocked(runnerClient.updateBot).mockReturnValue(update.promise);
+  const { queryClient } = renderApp();
+  await openBot();
+  const details = within(await openDetails());
+  fireEvent.click(details.getByRole("button", { name: "编辑指令" }));
+  const editor = within(await screen.findByRole("dialog", { name: "编辑指令" }));
+  fireEvent.change(editor.getByRole("textbox", { name: "指令" }), { target: { value: "旧操作" } });
+  fireEvent.click(editor.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(runnerClient.updateBot).toHaveBeenCalledTimes(1));
+  fireEvent.click(editor.getByRole("button", { name: "Close" }));
+  const settings = await openRunnerSettings();
+  fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
+  await waitFor(() => expect(runnerClient.initialize).toHaveBeenCalledTimes(2));
+  await act(async () => update.resolve({ bot: initialState.bots[0]!, bots: initialState.bots }));
+  const catalog = queryClient.getQueryData<InitializeResult>(["runner", "catalog"]);
+  expect(catalog?.bots[0]?.name).toBe("重启后的名称");
+  fireEvent.click(screen.getByRole("button", { name: "返回" }));
+  expect(
+    await within(await screen.findByRole("region", { name: "聊天内容" })).findByRole("heading", {
+      name: "重启后的名称",
+    }),
+  ).toBeTruthy();
+});
+
+it("keeps lifecycle controls pending when switching settings sections", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  const restart = deferred<void>();
+  vi.mocked(runnerClient.restartRunner).mockReturnValue(restart.promise);
+  renderApp();
+  let settings = await openRunnerSettings();
+  fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
+  await waitFor(() => expect(runnerClient.restartRunner).toHaveBeenCalledTimes(1));
+  fireEvent.click(within(settings).getByRole("button", { name: "模型与 Provider" }));
+  fireEvent.click(screen.getByRole("button", { name: "Runner" }));
+  settings = screen.getByRole("region", { name: "设置" });
+  expect(
+    (within(settings).getByRole("button", { name: "重新启动并连接" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (within(settings).getByRole("button", { name: "停止后台 Runner" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(within(settings).getByRole("button", { name: "停止后台 Runner" }));
+  expect(runnerClient.stopRunner).not.toHaveBeenCalled();
+  await act(async () => restart.resolve());
+  await waitFor(() =>
+    expect(
+      (within(settings).getByRole("button", { name: "重新启动并连接" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+});
+
+it("keeps sending disabled until the accepted submission has finished refreshing", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  const refresh = deferred<ConversationSnapshot>();
+  vi.mocked(runnerClient.snapshot)
+    .mockResolvedValueOnce(initialSnapshot)
+    .mockReturnValueOnce(refresh.promise);
+  vi.mocked(runnerClient.submit).mockResolvedValue({ id: 92 });
+  renderApp();
+  await openBot();
+  const input = screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: "第一条" } });
+  fireEvent.submit(input.closest("form")!);
+  await waitFor(() => expect(input.value).toBe(""));
+  expect(input.disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => refresh.resolve(initialSnapshot));
+  await waitFor(() => expect(input.disabled).toBe(false));
+});
+
+it("does not show a previous Bot's operation error after switching Bots", async () => {
+  mockTwoBots();
+  vi.mocked(runnerClient.updateBot).mockRejectedValue(new Error("测试助手的配置冲突"));
+  renderApp();
+  await openBot();
+  const details = within(await openDetails());
+  fireEvent.click(details.getByRole("button", { name: "编辑指令" }));
+  const editor = within(await screen.findByRole("dialog", { name: "编辑指令" }));
+  fireEvent.click(editor.getByRole("button", { name: "保存" }));
+  await screen.findByText("测试助手的配置冲突");
+  await openBot(/写作助手/);
+  await waitFor(() => expect(screen.queryByText("测试助手的配置冲突")).toBeNull());
+});
+
+it("resumes reads after a failed stop and keeps a failed restart paused until retry", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  vi.mocked(runnerClient.stopRunner).mockRejectedValueOnce(new Error("停止失败"));
+  vi.mocked(runnerClient.restartRunner)
+    .mockRejectedValueOnce(new Error("重启失败"))
+    .mockResolvedValueOnce(undefined);
+  const { queryClient } = renderApp();
+  await openBot();
+  const settings = await openRunnerSettings();
+  fireEvent.click(within(settings).getByRole("button", { name: "停止后台 Runner" }));
+  await within(settings).findByText("停止失败");
+  expect(queryClient.getQueryData<{ paused: boolean }>(["runner", "lifecycle"])?.paused).toBe(
+    false,
+  );
+  fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
+  await within(settings).findByText("重启失败");
+  expect(queryClient.getQueryData<{ paused: boolean }>(["runner", "lifecycle"])?.paused).toBe(true);
+  expect(queryClient.getQueryData(["runner", "snapshot", 41])).toBeUndefined();
+  fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
+  await waitFor(() => expect(runnerClient.initialize).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(queryClient.getQueryData<{ paused: boolean }>(["runner", "lifecycle"])?.paused).toBe(
+      false,
+    ),
+  );
+});
+
+it("starts fresh UI and draft stores when the application is mounted again", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  const first = renderApp();
+  await openBot();
+  fireEvent.change(screen.getByRole("textbox", { name: "发送消息" }), {
+    target: { value: "上一窗口的草稿" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索 Bot" }), {
+    target: { value: "上一窗口的搜索" },
+  });
+  first.unmount();
+  renderApp();
+  expect(
+    ((await screen.findByRole("textbox", { name: "搜索 Bot" })) as HTMLInputElement).value,
+  ).toBe("");
+  await openBot();
+  expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe("");
 });

@@ -1,8 +1,8 @@
-import { Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeftIcon, CpuIcon, InfoIcon, KeyRoundIcon, PaletteIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
+import { useRunnerCatalog } from "@/app/runner-queries";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -24,11 +24,14 @@ export function SettingsLayout() {
       ? (sectionMatch.section as string)
       : null;
   const active = settingsSections.find((item) => item.id === activeSection);
-  const { selection } = useWorkspaceContext();
+  const { returnBotId } = useSearch({ from: "/settings" });
+  const { data: catalog } = useRunnerCatalog();
 
   // Back always targets the workspace, not the previous settings page.
   function leaveSettings() {
-    const botId = selection.selectedBotId;
+    const botId = catalog?.bots.some((bot) => bot.id === returnBotId && !bot.archived)
+      ? returnBotId
+      : undefined;
     if (botId) void navigate({ to: "/bots/$botId", params: { botId } });
     else void navigate({ to: "/" });
   }
@@ -61,7 +64,11 @@ export function SettingsLayout() {
                 active?.id === item.id && "bg-accent",
               )}
               onClick={() =>
-                void navigate({ to: "/settings/$section", params: { section: item.id } })
+                void navigate({
+                  to: "/settings/$section",
+                  params: { section: item.id },
+                  search: { returnBotId },
+                })
               }
             >
               <item.icon className="size-4" />
@@ -91,7 +98,7 @@ export function SettingsLayout() {
             variant="ghost"
             size="icon-sm"
             className="md:hidden"
-            onClick={() => void navigate({ to: "/settings" })}
+            onClick={() => void navigate({ to: "/settings", search: { returnBotId } })}
           >
             <ChevronLeftIcon />
           </Button>

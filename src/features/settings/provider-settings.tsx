@@ -1,14 +1,14 @@
 import { useState } from "react";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfoRow } from "@/components/ui/inspector-section";
 import { Separator } from "@/components/ui/separator";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
+import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
 export function ProviderSettings() {
-  const { connection, feedback, actions } = useWorkspaceContext();
+  const { connection, feedback, actions } = useRunnerSettings();
   const [providerKey, setProviderKey] = useState("");
   async function onSetProviderCredential(key: string | null) {
     if (await actions.setProviderCredential(key)) setProviderKey("");

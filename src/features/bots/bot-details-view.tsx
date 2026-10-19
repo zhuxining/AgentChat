@@ -3,7 +3,6 @@ import { SparklesIcon, WrenchIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { BotDraft } from "@/app/runner-client";
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { initializeBotDraft } from "@/features/bots/bot-draft";
 import { CapabilityFields } from "@/features/bots/capability-fields";
 import { GoalEditor } from "@/features/bots/goal-editor";
+import { useBotChat } from "@/features/chat/use-bot-chat";
 
 const thinkingLevels = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -32,9 +32,9 @@ type EditState =
 
 // Detail content is shared by the wide-screen pane and the standalone page. Simple values
 // change inline; anything with real editing volume opens a dialog instead of a separate page.
-// The pane leaves error reporting to the chat banner beside it instead of repeating it.
-export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean }) {
-  const { catalog, selection, connection, conversation, feedback, actions } = useWorkspaceContext();
+// Operations report errors where they were initiated, including the desktop pane.
+export function BotDetailsView() {
+  const { catalog, selection, connection, conversation, operationError, actions } = useBotChat();
   const navigate = useNavigate();
   const [edit, setEdit] = useState<EditState>(null);
   const bot = selection.activeBot;
@@ -68,9 +68,9 @@ export function BotDetailsView({ showFeedback = true }: { showFeedback?: boolean
 
   return (
     <div className="space-y-5">
-      {showFeedback && feedback.error && (
+      {operationError && (
         <p role="alert" className="text-destructive animate-fade-in text-sm">
-          {feedback.error}
+          {operationError}
         </p>
       )}
       <div className="bg-card flex items-center gap-3 rounded-xl border p-3">

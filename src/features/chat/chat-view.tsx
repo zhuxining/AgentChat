@@ -9,8 +9,8 @@ import {
 } from "lucide-react";
 import { Fragment } from "react";
 import { Streamdown } from "streamdown";
+import { useShallow } from "zustand/react/shallow";
 
-import { useWorkspaceContext } from "@/app/workspace-provider";
 import { useWorkspaceUi } from "@/app/workspace-ui";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
+import { useBotChat } from "@/features/chat/use-bot-chat";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
 import { useMarkdownPlugins } from "@/features/chat/use-markdown-plugins";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -51,15 +52,18 @@ function rowId(conversationId: number, messageId: number) {
 }
 
 export function ChatView({ botId }: { botId: string }) {
-  const workspace = useWorkspaceContext();
+  const workspace = useBotChat();
   const { selection, connection, feedback, messaging, conversation, actions } = workspace;
   const navigate = useNavigate();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const { detailsOpen, toggleDetails, botListOpen } = useWorkspaceUi();
-  const segments = useBotTimeline(selection.botConversations, {
-    id: selection.conversationId,
-    snapshot: selection.snapshot,
-  });
+  const { detailsOpen, toggleDetails, botListOpen } = useWorkspaceUi(
+    useShallow((state) => ({
+      detailsOpen: state.detailsOpen,
+      toggleDetails: state.toggleDetails,
+      botListOpen: state.botListOpen,
+    })),
+  );
+  const segments = useBotTimeline(selection.botConversations);
   const markdownPlugins = useMarkdownPlugins(
     segments.flatMap((segment) => segment.snapshot.messages.map((message) => message.text)),
   );
@@ -160,7 +164,11 @@ export function ChatView({ botId }: { botId: string }) {
             variant="ghost"
             size="sm"
             onClick={() =>
-              void navigate({ to: "/settings/$section", params: { section: "provider" } })
+              void navigate({
+                to: "/settings/$section",
+                params: { section: "provider" },
+                search: { returnBotId: botId },
+              })
             }
           >
             配置密钥
@@ -345,7 +353,7 @@ export function ChatView({ botId }: { botId: string }) {
               connection.busy ||
               connection.runnerUnavailable ||
               !connection.ready ||
-              messaging.pendingSubmission !== null
+              messaging.pendingSubmission?.conversationId === selection.conversationId
             }
             placeholder={`发送消息给 ${selection.activeBot?.name ?? "Bot"}`}
             value={messaging.input}
@@ -370,6 +378,7 @@ export function ChatView({ botId }: { botId: string }) {
                 connection.runnerUnavailable ||
                 !connection.ready ||
                 !messaging.input.trim() ||
+                messaging.submitting ||
                 (messaging.pendingSubmission !== null &&
                   messaging.pendingSubmission.conversationId !== selection.conversationId)
               }
