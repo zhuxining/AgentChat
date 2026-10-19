@@ -209,9 +209,9 @@ it("shows pending input, clears the composer, refreshes replies, and stops polli
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1_300));
   });
-  expect(
-    within(screen.getByRole("region", { name: "聊天内容" })).getByText("任务已完成。"),
-  ).toBeTruthy();
+  const chat = within(screen.getByRole("region", { name: "聊天内容" }));
+  const replyRow = chat.getByText("任务已完成。").closest('[data-slot="message-scroller-item"]');
+  expect(replyRow?.classList.contains("animate-message-in")).toBe(true);
 
   const settledSnapshotCalls = vi.mocked(runnerClient.snapshot).mock.calls.length;
   view.unmount();
@@ -988,4 +988,130 @@ it("starts fresh UI and draft stores when the application is mounted again", asy
   ).toBe("");
   await openBot();
   expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe("");
+});
+
+it("keeps Bot content stable while the selected conversation snapshot loads", async () => {
+  const bot = { ...initialState.bots[0]!, id: "bot-2", name: "写作助手" };
+  const conversation = {
+    ...initialState.conversations[0]!,
+    id: 55,
+    botId: bot.id,
+    botName: bot.name,
+    createdAt: 2,
+  };
+  const botASnapshot: ConversationSnapshot = {
+    ...initialSnapshot,
+    messages: [{ id: 1, role: "assistant", text: "测试助手已有回复", truncated: false }],
+  };
+  const botBSnapshot: ConversationSnapshot = {
+    ...initialSnapshot,
+    conversation: {
+      ...initialSnapshot.conversation,
+      id: conversation.id,
+      botId: bot.id,
+      botName: bot.name,
+    },
+    goal: { ...initialSnapshot.goal, description: "写作助手的工作目标", updatedAt: 1 },
+    messages: [{ id: 2, role: "assistant", text: "写作助手已有回复", truncated: false }],
+  };
+  const pendingBotSnapshot = deferred<ConversationSnapshot>();
+  vi.mocked(runnerClient.initialize).mockResolvedValue({
+    ...initialState,
+    bots: [...initialState.bots, bot],
+    conversations: [...initialState.conversations, conversation],
+  });
+  vi.mocked(runnerClient.snapshot).mockImplementation(async (id) =>
+    id === 41 ? botASnapshot : pendingBotSnapshot.promise,
+  );
+  renderApp();
+  await openBot();
+  const details = within(await openDetails());
+  const goalA = await details.findByRole("textbox", { name: "工作目标" });
+  fireEvent.change(goalA, { target: { value: "测试助手的未保存目标" } });
+  const chat = within(screen.getByRole("region", { name: "聊天内容" }));
+  expect(await chat.findByText("测试助手已有回复")).toBeTruthy();
+
+  const botList = within(screen.getByRole("navigation", { name: "Bot 列表" }));
+  fireEvent.click(botList.getByRole("button", { name: /写作助手/ }));
+  await waitFor(() => expect(chat.getByRole("heading", { name: "写作助手" })).toBeTruthy());
+
+  // The new Bot has no snapshot yet: loading, never an empty conversation.
+  expect(chat.queryByText("开始这次对话")).toBeNull();
+  expect(chat.getByRole("status", { name: "正在加载会话" })).toBeTruthy();
+  expect(botList.getByText("正在加载最近对话…")).toBeTruthy();
+  expect(details.getByText("当前对话")).toBeTruthy();
+  expect(details.getByText("正在加载会话…")).toBeTruthy();
+
+  pendingBotSnapshot.resolve(botBSnapshot);
+  expect(await chat.findByText("写作助手已有回复")).toBeTruthy();
+  expect(await botList.findByText("写作助手已有回复")).toBeTruthy();
+  const botBGoal = await details.findByRole("textbox", { name: "工作目标" });
+  expect((botBGoal as HTMLTextAreaElement).value).toBe("写作助手的工作目标");
+  fireEvent.change(botBGoal, { target: { value: "写作助手的未保存目标" } });
+  // Loading a snapshot must not replay the entrance animation for its history.
+  const loadedRow = chat
+    .getByText("写作助手已有回复")
+    .closest('[data-slot="message-scroller-item"]');
+  expect(loadedRow?.classList.contains("animate-message-in")).toBe(false);
+
+  fireEvent.click(botList.getByRole("button", { name: /测试助手/ }));
+  expect(await chat.findByText("测试助手已有回复")).toBeTruthy();
+  expect(chat.queryByRole("status", { name: "正在加载会话" })).toBeNull();
+  expect((details.getByRole("textbox", { name: "工作目标" }) as HTMLTextAreaElement).value).toBe(
+    "测试助手的未保存目标",
+  );
+
+  fireEvent.click(botList.getByRole("button", { name: /写作助手/ }));
+  expect(await chat.findByText("写作助手已有回复")).toBeTruthy();
+  expect((details.getByRole("textbox", { name: "工作目标" }) as HTMLTextAreaElement).value).toBe(
+    "写作助手的未保存目标",
+  );
+});
+
+it("keeps the loaded conversation visible when a snapshot refresh fails", async () => {
+  let failing = false;
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockImplementation(async () => {
+    if (failing) throw new Error("Runner 连接已断开");
+    return {
+      ...initialSnapshot,
+      messages: [{ id: 4, role: "assistant", text: "刷新前已加载的内容", truncated: false }],
+    };
+  });
+  renderApp();
+  await openBot();
+  const chat = within(screen.getByRole("region", { name: "聊天内容" }));
+  expect(await chat.findByText("刷新前已加载的内容")).toBeTruthy();
+
+  failing = true;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+  });
+  expect(chat.getByText("刷新前已加载的内容")).toBeTruthy();
+  expect(chat.queryByRole("status", { name: "正在加载会话" })).toBeNull();
+  expect(await screen.findByRole("alert")).toBeTruthy();
+});
+
+it("keeps settings drafts while switching categories but clears them on leaving", async () => {
+  vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
+  vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
+  renderApp();
+  fireEvent.click(await screen.findByRole("button", { name: "应用设置" }));
+  const settings = within(await screen.findByRole("region", { name: "设置" }));
+  const keyInput = () => settings.getByLabelText("DeepSeek API Key") as HTMLInputElement;
+  fireEvent.change(keyInput(), { target: { value: "draft-across-categories" } });
+
+  fireEvent.click(settings.getByRole("button", { name: "Runner" }));
+  expect(await settings.findByRole("region", { name: "后台运行状态" })).toBeTruthy();
+  expect(settings.queryByRole("region", { name: "DeepSeek" })).toBeNull();
+  fireEvent.click(settings.getByRole("button", { name: "模型与 Provider" }));
+  expect(await settings.findByRole("region", { name: "DeepSeek" })).toBeTruthy();
+  expect(keyInput().value).toBe("draft-across-categories");
+
+  fireEvent.click(settings.getByRole("button", { name: "返回" }));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "设置" })).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
+  const reopened = within(await screen.findByRole("region", { name: "设置" }));
+  fireEvent.click(reopened.getByRole("button", { name: "模型与 Provider" }));
+  expect(((await reopened.findByLabelText("DeepSeek API Key")) as HTMLInputElement).value).toBe("");
 });

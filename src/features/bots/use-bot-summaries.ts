@@ -4,15 +4,23 @@ import type { Bot, ConversationSnapshot, ConversationSummary } from "@/app/runne
 import { snapshotOptions, useRunnerLifecycle } from "@/app/runner-queries";
 import { useWorkspaceResources } from "@/app/workspace-provider";
 
-export type BotSummary = { latestMessage: string; executing: boolean };
+export type BotSummary =
+  | { status: "empty" }
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; latestMessage: string; executing: boolean };
+
 function selectSummary(snapshot: ConversationSnapshot): BotSummary {
   return {
+    status: "ready",
     latestMessage: snapshot.messages.filter((message) => message.text).at(-1)?.text ?? "",
     executing: snapshot.activeTasks.some((task) => task.status === "running"),
   };
 }
 
 // Summary and transcript observers share the same snapshot cache and in-flight request.
+// A summary distinguishes loading and failure from an actually empty conversation so the
+// list never claims a Bot has no history while its snapshot is still unknown.
 export function useBotSummaries(
   bots: Bot[],
   conversations: ConversationSummary[],
@@ -35,10 +43,20 @@ export function useBotSummaries(
     })),
   });
   const summaries = new Map<string, BotSummary>();
-  if (paused) return summaries;
   targets.forEach((target, index) => {
-    const summary = queries[index]?.data;
-    if (summary) summaries.set(target.botId, summary);
+    if (target.conversationId === null) {
+      summaries.set(target.botId, { status: "empty" });
+      return;
+    }
+    // A paused Runner's cached snapshot is not presented as the Bot's current state.
+    const query = paused ? undefined : queries[index];
+    if (query?.data) {
+      summaries.set(target.botId, query.data);
+    } else if (paused || query?.isError) {
+      summaries.set(target.botId, { status: "error" });
+    } else {
+      summaries.set(target.botId, { status: "loading" });
+    }
   });
   return summaries;
 }

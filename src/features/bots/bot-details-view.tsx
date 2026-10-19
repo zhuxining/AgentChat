@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { initializeBotDraft } from "@/features/bots/bot-draft";
 import { CapabilityFields } from "@/features/bots/capability-fields";
@@ -39,6 +40,10 @@ export function BotDetailsView() {
   const [edit, setEdit] = useState<EditState>(null);
   const bot = selection.activeBot;
   const snapshot = selection.snapshot;
+  const snapshotUnavailable =
+    selection.conversationId !== null &&
+    snapshot === null &&
+    (Boolean(selection.snapshotError) || connection.runnerUnavailable);
   const disabled = connection.busy || connection.runnerUnavailable;
 
   if (!bot) {
@@ -227,31 +232,59 @@ export function BotDetailsView() {
         </DetailsRow>
       </DetailsGroup>
 
-      {snapshot && (
+      {selection.conversationId !== null && (
         <DetailsGroup title="当前对话">
-          <DetailsRow label="状态">
-            <span className="text-xs">
-              {conversation.executing ? "执行中" : conversation.hasLiveTasks ? "等待中" : "空闲"}
-            </span>
-          </DetailsRow>
-          <DetailsRow label="会话">
-            <span className="text-xs">共 {selection.botConversations.length} 段</span>
-          </DetailsRow>
-          <div className="space-y-2 px-3 py-2">
-            <p className="text-muted-foreground text-xs">工作目标</p>
-            <GoalEditor />
-          </div>
-          {conversation.hasUpdatedBotSettings && (
-            <div className="px-3 py-2">
-              <Button
-                className="w-full"
-                variant="outline"
-                size="sm"
-                disabled={disabled || conversation.hasLiveTasks}
-                onClick={() => void actions.applyBotSettings()}
-              >
-                应用最新 Bot 设置
-              </Button>
+          {snapshot ? (
+            <>
+              <DetailsRow label="状态">
+                <span className="text-xs">
+                  {conversation.executing
+                    ? "执行中"
+                    : conversation.hasLiveTasks
+                      ? "等待中"
+                      : "空闲"}
+                </span>
+              </DetailsRow>
+              <DetailsRow label="会话">
+                <span className="text-xs">共 {selection.botConversations.length} 段</span>
+              </DetailsRow>
+              <div className="space-y-2 px-3 py-2">
+                <p className="text-muted-foreground text-xs">工作目标</p>
+                <GoalEditor />
+              </div>
+              {conversation.hasUpdatedBotSettings && (
+                <div className="px-3 py-2">
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled || conversation.hasLiveTasks}
+                    onClick={() => void actions.applyBotSettings()}
+                  >
+                    应用最新 Bot 设置
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div
+              role="status"
+              aria-label={snapshotUnavailable ? "会话读取失败" : "正在加载会话"}
+              className="space-y-2 px-3 py-3"
+            >
+              <p className="text-muted-foreground text-xs">
+                {snapshotUnavailable ? "会话读取失败" : "正在加载会话…"}
+              </p>
+              <DetailsRow label="状态">
+                <Skeleton className="h-4 w-14" />
+              </DetailsRow>
+              <DetailsRow label="会话">
+                <Skeleton className="h-4 w-10" />
+              </DetailsRow>
+              <div className="space-y-2 px-3 py-2">
+                <p className="text-muted-foreground text-xs">工作目标</p>
+                <Skeleton className="h-16 w-full" />
+              </div>
             </div>
           )}
         </DetailsGroup>

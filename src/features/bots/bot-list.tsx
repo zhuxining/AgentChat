@@ -127,6 +127,13 @@ export function BotList({
   );
 }
 
+function summaryText(summary: BotSummary | undefined) {
+  if (!summary || summary.status === "empty") return "开始新的对话";
+  if (summary.status === "loading") return "正在加载最近对话…";
+  if (summary.status === "error") return "最近对话暂时不可用";
+  return summary.latestMessage || "开始新的对话";
+}
+
 function BotListItem({
   bot,
   selected,
@@ -152,7 +159,7 @@ function BotListItem({
       <span className="min-w-0 flex-1 text-left">
         <span className="flex items-center justify-between gap-2">
           <span className="truncate font-medium">{bot.name}</span>
-          {summary?.executing && (
+          {summary?.status === "ready" && summary.executing && (
             <span
               role="img"
               aria-label="正在处理"
@@ -161,7 +168,7 @@ function BotListItem({
           )}
         </span>
         <span className="text-muted-foreground mt-1 block truncate text-xs">
-          {summary?.executing ? "正在处理…" : summary?.latestMessage || "开始新的对话"}
+          {summary?.status === "ready" && summary.executing ? "正在处理…" : summaryText(summary)}
         </span>
       </span>
     </Button>

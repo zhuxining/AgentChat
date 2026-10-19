@@ -234,10 +234,24 @@ function BotDetailsRoute() {
 
 function SettingsSectionPage() {
   const { section } = useParams({ from: "/settings/$section" });
-  if (section === "provider") return <ProviderSettings />;
-  if (section === "runner") return <RunnerSettings />;
-  if (section === "about") return <AboutSettings />;
-  return <GeneralSettings />;
+  // Every section stays mounted so unsaved drafts survive switching categories; leaving
+  // settings unmounts all of them, which is what clears the credential draft.
+  return (
+    <>
+      <div hidden={section !== "general"}>
+        <GeneralSettings />
+      </div>
+      <div hidden={section !== "provider"}>
+        <ProviderSettings />
+      </div>
+      <div hidden={section !== "runner"}>
+        <RunnerSettings />
+      </div>
+      <div hidden={section !== "about"}>
+        <AboutSettings />
+      </div>
+    </>
+  );
 }
 
 // The Bot list is the workspace's own left pane on desktop and the index page below it.

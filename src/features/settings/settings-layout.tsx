@@ -102,12 +102,16 @@ export function SettingsLayout() {
           >
             <ChevronLeftIcon />
           </Button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" data-window-drag-region>
+          <h1
+            key={active?.id ?? "index"}
+            className="animate-fade-in min-w-0 flex-1 truncate text-sm font-semibold"
+            data-window-drag-region
+          >
             {active ? active.label : "设置"}
           </h1>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div key={active?.id ?? "index"} className="animate-fade-in mx-auto max-w-2xl space-y-6">
+          <div className="animate-fade-in mx-auto max-w-2xl space-y-6">
             {active ? (
               <Outlet />
             ) : (
