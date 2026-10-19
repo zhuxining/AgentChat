@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import type { ProviderInstance } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { providerError, useProviderOperation } from "@/features/settings/use-providers";
 
 import type { CredentialSource, ProviderAuthentication } from "../../../contracts/providers";
@@ -20,6 +23,7 @@ export function CredentialSettings({
   const [secret, setSecret] = useState("");
   const [fileMode, setFileMode] = useState("literal");
   const [notice, setNotice] = useState("");
+  const ids = useId();
   if (instance.auth.type !== "apiKey") return null;
   const source = instance.auth.source;
   const writable = source.type !== "env";
@@ -36,41 +40,44 @@ export function CredentialSettings({
   }
   return (
     <div className="space-y-3">
-      <label className="block text-sm">
-        凭据来源
-        <select
+      <Field>
+        <FieldLabel htmlFor={`${ids}-source`}>凭据来源</FieldLabel>
+        <NativeSelect
+          id={`${ids}-source`}
           aria-label="凭据来源"
-          className="bg-background mt-1 h-9 w-full rounded-md border px-2"
+          className="w-full"
           value={source.type}
           onChange={(event) => changeSource(event.target.value)}
         >
-          <option value="keyring">系统凭据库</option>
-          <option value="env">环境变量</option>
-          <option value="file">独立凭据文件</option>
-        </select>
-      </label>
+          <NativeSelectOption value="keyring">系统凭据库</NativeSelectOption>
+          <NativeSelectOption value="env">环境变量</NativeSelectOption>
+          <NativeSelectOption value="file">独立凭据文件</NativeSelectOption>
+        </NativeSelect>
+      </Field>
       {source.type === "env" ? (
         <>
-          <label className="block text-sm">
-            环境变量名
+          <Field>
+            <FieldLabel htmlFor={`${ids}-variable`}>环境变量名</FieldLabel>
             <Input
+              id={`${ids}-variable`}
               aria-label="环境变量名"
               value={source.variable}
               onChange={(event) =>
                 onChange({ type: "apiKey", source: { ...source, variable: event.target.value } })
               }
             />
-          </label>
-          <p className="text-muted-foreground text-xs">
-            从后台宿主的环境读取；不会自动改用其他来源。外部环境改变后可能需要从新环境重新启动宿主。
-          </p>
+            <FieldDescription>
+              从后台宿主的环境读取；不会自动改用其他来源。外部环境改变后可能需要从新环境重新启动宿主。
+            </FieldDescription>
+          </Field>
         </>
       ) : (
         <>
           {source.type === "file" && (
-            <label className="block text-sm">
-              凭据文件路径
+            <Field>
+              <FieldLabel htmlFor={`${ids}-path`}>凭据文件路径</FieldLabel>
               <Input
+                id={`${ids}-path`}
                 aria-label="凭据文件路径"
                 value={source.path}
                 placeholder="credentials/providers.json"
@@ -78,45 +85,48 @@ export function CredentialSettings({
                   onChange({ type: "apiKey", source: { ...source, path: event.target.value } })
                 }
               />
-              <span className="text-muted-foreground text-xs">
-                仅允许数据目录 credentials/ 下的文件。
-              </span>
-            </label>
+              <FieldDescription>仅允许数据目录 credentials/ 下的文件。</FieldDescription>
+            </Field>
           )}
-          <label className="block text-sm">
-            凭据条目
+          <Field>
+            <FieldLabel htmlFor={`${ids}-entry`}>凭据条目</FieldLabel>
             <Input
+              id={`${ids}-entry`}
               aria-label="凭据条目"
               value={source.entry}
               onChange={(event) =>
                 onChange({ type: "apiKey", source: { ...source, entry: event.target.value } })
               }
             />
-          </label>
+          </Field>
         </>
       )}
       {writable && (
         <>
           {source.type === "file" && (
-            <label className="block text-sm">
-              文件值格式
-              <select
+            <Field>
+              <FieldLabel htmlFor={`${ids}-file-mode`}>文件值格式</FieldLabel>
+              <NativeSelect
+                id={`${ids}-file-mode`}
                 aria-label="文件值格式"
-                className="bg-background mt-1 h-9 w-full rounded-md border px-2"
+                className="w-full"
                 value={fileMode}
                 onChange={(event) => {
                   setFileMode(event.target.value);
                   setSecret("");
                 }}
               >
-                <option value="literal">明文密钥</option>
-                <option value="env">显式环境变量引用</option>
-              </select>
-            </label>
+                <NativeSelectOption value="literal">明文密钥</NativeSelectOption>
+                <NativeSelectOption value="env">显式环境变量引用</NativeSelectOption>
+              </NativeSelect>
+            </Field>
           )}
-          <label className="block text-sm">
-            {fileMode === "env" && source.type === "file" ? "引用的环境变量名" : "新的 API Key"}
+          <Field>
+            <FieldLabel htmlFor={`${ids}-secret`}>
+              {fileMode === "env" && source.type === "file" ? "引用的环境变量名" : "新的 API Key"}
+            </FieldLabel>
             <Input
+              id={`${ids}-secret`}
               aria-label="新的 API Key"
               type="password"
               autoComplete="off"
@@ -128,7 +138,7 @@ export function CredentialSettings({
                   : "保存后不回显"
               }
             />
-          </label>
+          </Field>
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={!saved || operation.isPending || !secret.trim()}
@@ -169,9 +179,7 @@ export function CredentialSettings({
             </Button>
           </div>
           {!saved && (
-            <p className="text-muted-foreground text-xs">
-              请先保存接入与凭据来源，再写入或移除凭据。
-            </p>
+            <FieldDescription>请先保存接入与凭据来源，再写入或移除凭据。</FieldDescription>
           )}
         </>
       )}
@@ -181,9 +189,9 @@ export function CredentialSettings({
         </p>
       )}
       {operation.error && (
-        <p role="alert" className="text-destructive text-sm">
-          {providerError(operation.error)}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{providerError(operation.error)}</AlertDescription>
+        </Alert>
       )}
     </div>
   );

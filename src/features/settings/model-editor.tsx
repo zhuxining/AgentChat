@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import type { Json, ProviderInstance, ProviderModel } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Field, FieldDescription, FieldLabel, FieldSet, FieldLegend } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 
 function scalar(value: Json | undefined) {
@@ -74,6 +79,7 @@ export function ModelEditor({
   // JSON text is the sole draft. Form controls read and update the same document.
   const [text, setText] = useState(() => JSON.stringify(initial, null, 2));
   const [error, setError] = useState("");
+  const ids = useId();
   let draft: ObjectValue | null = null;
   try {
     draft = parseObject(text);
@@ -133,38 +139,40 @@ export function ModelEditor({
         内置模型仅保存差异；未填写的字段继承目录。表单与高级 JSON 使用同一草稿。提交后请保存接入。
       </p>
       {custom && (
-        <label className="block text-sm">
-          模型 ID
+        <Field>
+          <FieldLabel htmlFor={`${ids}-id`}>模型 ID</FieldLabel>
           <Input
+            id={`${ids}-id`}
             aria-label="自定义模型 ID"
             value={scalar(effective.id)}
             disabled={!!model || !draft}
             onChange={(event) => update("id", event.target.value)}
           />
-        </label>
+        </Field>
       )}
-      <label className="block text-sm">
-        API 协议
-        <select
+      <Field>
+        <FieldLabel htmlFor={`${ids}-api`}>API 协议</FieldLabel>
+        <NativeSelect
+          id={`${ids}-api`}
           aria-label="模型 API 协议"
-          className="bg-background h-9 w-full rounded-md border px-2"
+          className="w-full"
           disabled={!draft}
           value={typeof effective.api === "string" ? effective.api : ""}
           onChange={(event) => update("api", event.target.value)}
         >
-          <option value="">选择协议</option>
+          <NativeSelectOption value="">选择协议</NativeSelectOption>
           {[
             ...new Set([
               ...apiOptions,
               ...(typeof effective.api === "string" && effective.api ? [effective.api] : []),
             ]),
           ].map((api) => (
-            <option key={api} value={api}>
+            <NativeSelectOption key={api} value={api}>
               {api}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </Field>
       {(
         [
           ["name", "模型名称"],
@@ -173,17 +181,20 @@ export function ModelEditor({
           ["maxTokens", "输出上限"],
         ] as const
       ).map(([field, label]) => (
-        <div className="block text-sm" key={field}>
-          {label}
-          <span className="text-muted-foreground ml-2 text-xs">
-            {draft && field in draft ? "已覆盖" : "继承默认值"}
-          </span>
-          {!custom && draft && field in draft && (
-            <Button size="sm" variant="ghost" onClick={() => reset(field)}>
-              恢复{label}默认值
-            </Button>
-          )}
+        <Field key={field}>
+          <div className="flex items-center gap-2">
+            <FieldLabel htmlFor={`${ids}-${field}`}>{label}</FieldLabel>
+            <span className="text-muted-foreground text-xs">
+              {draft && field in draft ? "已覆盖" : "继承默认值"}
+            </span>
+            {!custom && draft && field in draft && (
+              <Button size="sm" variant="ghost" onClick={() => reset(field)}>
+                恢复{label}默认值
+              </Button>
+            )}
+          </div>
           <Input
+            id={`${ids}-${field}`}
             aria-label={label}
             disabled={!draft}
             type={field === "contextWindow" || field === "maxTokens" ? "number" : "text"}
@@ -197,62 +208,79 @@ export function ModelEditor({
               )
             }
           />
-        </div>
+        </Field>
       ))}
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+      <Field orientation="horizontal" className="gap-2">
+        <Checkbox
+          id={`${ids}-reasoning`}
           aria-label="推理能力"
           disabled={!draft}
           checked={effective.reasoning === true}
-          onChange={(event) => update("reasoning", event.target.checked)}
+          onCheckedChange={(checked) => update("reasoning", checked)}
         />
-        推理能力
-      </label>
-      <fieldset className="flex gap-3 text-sm">
-        <legend>输入能力</legend>
-        {["text", "image"].map((kind) => (
-          <label key={kind}>
-            <input
-              type="checkbox"
-              aria-label={`输入 ${kind}`}
-              disabled={!draft}
-              checked={Array.isArray(effective.input) && effective.input.includes(kind)}
-              onChange={(event) => {
-                const input = Array.isArray(effective.input) ? effective.input : [];
-                update(
-                  "input",
-                  event.target.checked ? [...input, kind] : input.filter((item) => item !== kind),
-                );
-              }}
-            />{" "}
-            {kind}
-          </label>
-        ))}
-      </fieldset>
-      <label className="block space-y-1 text-sm">
-        高级 JSON（{custom ? "完整模型定义" : "差异覆盖"}）
+        <FieldLabel htmlFor={`${ids}-reasoning`} className="font-normal">
+          推理能力
+        </FieldLabel>
+      </Field>
+      <FieldSet className="gap-2">
+        <FieldLegend variant="label">输入能力</FieldLegend>
+        <div className="flex gap-3">
+          {["text", "image"].map((kind) => (
+            <Field key={kind} orientation="horizontal" className="w-auto gap-2">
+              <Checkbox
+                id={`${ids}-input-${kind}`}
+                aria-label={`输入 ${kind}`}
+                disabled={!draft}
+                checked={Array.isArray(effective.input) && effective.input.includes(kind)}
+                onCheckedChange={(checked) => {
+                  const input = Array.isArray(effective.input) ? effective.input : [];
+                  update(
+                    "input",
+                    checked ? [...input, kind] : input.filter((item) => item !== kind),
+                  );
+                }}
+              />
+              <FieldLabel htmlFor={`${ids}-input-${kind}`} className="font-normal">
+                {kind}
+              </FieldLabel>
+            </Field>
+          ))}
+        </div>
+      </FieldSet>
+      <Field>
+        <FieldLabel htmlFor={`${ids}-json`}>
+          高级 JSON（{custom ? "完整模型定义" : "差异覆盖"}）
+        </FieldLabel>
         <Textarea
+          id={`${ids}-json`}
           aria-label="模型高级 JSON"
           spellCheck={false}
           className="min-h-48 font-mono text-xs"
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-      </label>
-      <p className="text-muted-foreground text-xs">
-        可编辑 compat、samplingParams、cost、headers 等全部可序列化字段。秘密 Header 仅填写 $
-        {"{credential:entry}"} 引用，不能填写密钥。实际支持以对应协议为准。
-      </p>
-      {!draft && <p role="alert">JSON 无效，请修正后使用表单或提交。</p>}
-      <details>
-        <summary className="cursor-pointer text-sm">查看最终有效配置（未解析凭据）</summary>
-        <pre className="overflow-auto text-xs">{JSON.stringify(effective, null, 2)}</pre>
-      </details>
+        <FieldDescription>
+          可编辑 compat、samplingParams、cost、headers 等全部可序列化字段。秘密 Header 仅填写 $
+          {"{credential:entry}"} 引用，不能填写密钥。实际支持以对应协议为准。
+        </FieldDescription>
+      </Field>
+      {!draft && (
+        <Alert variant="destructive">
+          <AlertDescription>JSON 无效，请修正后使用表单或提交。</AlertDescription>
+        </Alert>
+      )}
+      <Collapsible defaultOpen render={<section className="space-y-2" />}>
+        <CollapsibleTrigger className="focus-visible:ring-ring cursor-pointer rounded-md text-sm outline-none focus-visible:ring-2">
+          查看最终有效配置（未解析凭据）
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="overflow-auto text-xs">{JSON.stringify(effective, null, 2)}</pre>
+        </CollapsibleContent>
+      </Collapsible>
       {error && (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       <div className="flex gap-2">
         <Button disabled={!draft} onClick={apply}>

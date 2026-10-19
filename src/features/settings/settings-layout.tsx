@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { useRunnerCatalog } from "@/app/runner-queries";
 import { Button } from "@/components/ui/button";
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { cn } from "@/lib/utils";
 
 export const settingsSections = [
@@ -56,24 +57,34 @@ export function SettingsLayout() {
         </header>
         <nav aria-label="设置分类" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
           {settingsSections.map((item) => (
-            <button
+            <Item
               key={item.id}
-              type="button"
-              className={cn(
-                "hover:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
-                active?.id === item.id && "bg-accent",
-              )}
-              onClick={() =>
-                void navigate({
-                  to: "/settings/$section",
-                  params: { section: item.id },
-                  search: { returnBotId },
-                })
+              render={
+                <button
+                  type="button"
+                  aria-current={active?.id === item.id ? "page" : undefined}
+                  onClick={() =>
+                    void navigate({
+                      to: "/settings/$section",
+                      params: { section: item.id },
+                      search: { returnBotId },
+                    })
+                  }
+                />
               }
+              size="xs"
+              className={cn(
+                "text-left text-sm hover:bg-muted",
+                active?.id === item.id && "bg-muted font-medium",
+              )}
             >
-              <item.icon className="size-4" />
-              <span className="flex-1 truncate">{item.label}</span>
-            </button>
+              <ItemMedia variant="icon">
+                <item.icon />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle className="w-full justify-start">{item.label}</ItemTitle>
+              </ItemContent>
+            </Item>
           ))}
         </nav>
         <footer className="shrink-0 border-t p-3">

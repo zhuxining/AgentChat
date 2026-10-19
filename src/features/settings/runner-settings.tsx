@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InfoRow } from "@/components/ui/inspector-section";
 import { ConfigurationEditor } from "@/features/settings/configuration-editor";
@@ -48,9 +49,9 @@ export function RunnerSettings() {
           </Button>
         </div>
         {feedback.error && (
-          <p role="alert" className="text-destructive text-sm">
-            {feedback.error}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{feedback.error}</AlertDescription>
+          </Alert>
         )}
       </SettingsSectionCard>
       {configuration && (
@@ -81,14 +82,12 @@ export function RunnerSettings() {
             </p>
           )}
           {configuration.errors.map((issue, index) => (
-            <p
-              role="alert"
-              className="text-destructive text-sm break-words"
-              key={`${issue.path}:${index}`}
-            >
-              {issue.path}
-              {issue.botId ? `（Bot ${issue.botId}）` : ""}：{issue.message}
-            </p>
+            <Alert variant="destructive" key={`${issue.path}:${index}`}>
+              <AlertDescription className="break-words">
+                {issue.path}
+                {issue.botId ? `（Bot ${issue.botId}）` : ""}：{issue.message}
+              </AlertDescription>
+            </Alert>
           ))}
           {configuration.errors.length > 0 && (
             <p className="text-muted-foreground text-xs">

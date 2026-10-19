@@ -3,6 +3,7 @@ import { SparklesIcon, WrenchIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { BotDraft } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { initializeBotDraft } from "@/features/bots/bot-draft";
@@ -72,23 +75,25 @@ export function BotDetailsView() {
   return (
     <div className="space-y-5">
       {operationError && (
-        <p role="alert" className="text-destructive animate-fade-in text-sm">
-          {operationError}
-        </p>
+        <Alert variant="destructive" className="animate-fade-in">
+          <AlertDescription>{operationError}</AlertDescription>
+        </Alert>
       )}
-      <div className="bg-card flex items-center gap-3 rounded-xl border p-3">
-        <Avatar size="lg">
-          <AvatarFallback>
-            <SparklesIcon />
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <p className="truncate font-medium">{bot.name}</p>
-          <p className="text-muted-foreground truncate text-xs">
+      <Item variant="outline" className="bg-card rounded-xl">
+        <ItemMedia>
+          <Avatar size="lg">
+            <AvatarFallback>
+              <SparklesIcon />
+            </AvatarFallback>
+          </Avatar>
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{bot.name}</ItemTitle>
+          <ItemDescription className="text-xs">
             {provider?.label ?? bot.model.provider} · {bot.model.modelId}
-          </p>
-        </div>
-      </div>
+          </ItemDescription>
+        </ItemContent>
+      </Item>
 
       <DetailsGroup title="资料">
         <DetailsRow label="名称">
@@ -127,9 +132,10 @@ export function BotDetailsView() {
 
       <DetailsGroup title="运行方式">
         <DetailsRow label="服务商">
-          <select
+          <NativeSelect
             aria-label="服务商"
-            className="bg-muted h-7 w-40 rounded-md border px-1.5 text-xs"
+            className="w-40"
+            size="sm"
             value={bot.model.provider}
             disabled={disabled || catalog.providers.length === 0}
             onChange={(event) => {
@@ -141,28 +147,33 @@ export function BotDetailsView() {
             }}
           >
             {catalog.providers.length === 0 && (
-              <option value={bot.model.provider}>{bot.model.provider}</option>
+              <NativeSelectOption value={bot.model.provider}>
+                {bot.model.provider}
+              </NativeSelectOption>
             )}
             {catalog.providers.map((item) => (
-              <option key={item.name} value={item.name}>
+              <NativeSelectOption key={item.name} value={item.name}>
                 {item.label ?? item.name}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </DetailsRow>
         <DetailsRow label="模型">
-          <BotModelSelect
-            providers={catalog.providers}
-            provider={bot.model.provider}
-            modelId={bot.model.modelId}
-            disabled={disabled}
-            onChange={(provider, modelId) => void save({ provider, modelId })}
-          />
+          <div className="w-40">
+            <BotModelSelect
+              providers={catalog.providers}
+              provider={bot.model.provider}
+              modelId={bot.model.modelId}
+              disabled={disabled}
+              onChange={(provider, modelId) => void save({ provider, modelId })}
+            />
+          </div>
         </DetailsRow>
         <DetailsRow label="思考级别">
-          <select
+          <NativeSelect
             aria-label="思考级别"
-            className="bg-muted h-7 w-40 rounded-md border px-1.5 text-xs"
+            className="w-40"
+            size="sm"
             value={bot.thinkingLevel}
             disabled={disabled}
             onChange={(event) =>
@@ -170,11 +181,11 @@ export function BotDetailsView() {
             }
           >
             {thinkingLevels.map((level) => (
-              <option key={level} value={level}>
+              <NativeSelectOption key={level} value={level}>
                 {level}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         </DetailsRow>
         <DetailsRow label="凭证">
           <Button

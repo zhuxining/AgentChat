@@ -2,8 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { runnerClient, type ProviderInstance, type ProviderModel } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { ModelEditor } from "@/features/settings/model-editor";
 
 export function ProviderModels({
@@ -95,79 +98,82 @@ export function ProviderModels({
         </p>
       )}
       {searchQuery.error && (
-        <p role="alert" className="text-destructive text-sm">
-          模型搜索失败，请重试。
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>模型搜索失败，请重试。</AlertDescription>
+        </Alert>
       )}
       <ul className="max-h-96 space-y-2 overflow-auto" aria-label="模型目录">
         {all
           .filter((model) => `${model.id} ${model.name}`.toLowerCase().includes(needle))
           .map((model) => (
-            <li key={model.id} className="space-y-2 rounded-lg border p-3">
-              <div className="flex items-center gap-2">
-                <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    aria-label={`在 Bot 中显示 ${model.id}`}
-                    checked={instance.visibleModels.includes(model.id)}
-                    onChange={(event) =>
+            <li key={model.id}>
+              <Item variant="outline" className="flex-col items-stretch">
+                <div className="flex items-center gap-2">
+                  <ItemMedia>
+                    <Checkbox
+                      aria-label={`在 Bot 中显示 ${model.id}`}
+                      checked={instance.visibleModels.includes(model.id)}
+                      onCheckedChange={(checked) =>
+                        onChange({
+                          ...instance,
+                          visibleModels: checked
+                            ? [...instance.visibleModels, model.id]
+                            : instance.visibleModels.filter((id) => id !== model.id),
+                        })
+                      }
+                    />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{model.name}</ItemTitle>
+                    <ItemDescription className="text-xs">
+                      {model.id} ·{" "}
+                      {model.custom
+                        ? "自定义"
+                        : instance.modelOverrides[model.id]
+                          ? "已覆盖"
+                          : "内置默认"}
+                    </ItemDescription>
+                  </ItemContent>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label={`编辑模型 ${model.id}`}
+                    onClick={() => setEditing(model)}
+                  >
+                    编辑
+                  </Button>
+                </div>
+                {!model.custom && instance.modelOverrides[model.id] && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const overrides = { ...instance.modelOverrides };
+                      delete overrides[model.id];
+                      onChange({ ...instance, modelOverrides: overrides });
+                      setEditing(null);
+                    }}
+                  >
+                    恢复 {model.id} 内置默认值
+                  </Button>
+                )}
+                {model.custom && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
                       onChange({
                         ...instance,
-                        visibleModels: event.target.checked
-                          ? [...instance.visibleModels, model.id]
-                          : instance.visibleModels.filter((id) => id !== model.id),
-                      })
-                    }
-                  />
-                  <span className="truncate">{model.name}</span>
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-label={`编辑模型 ${model.id}`}
-                  onClick={() => setEditing(model)}
-                >
-                  编辑
-                </Button>
-              </div>
-              <p className="text-muted-foreground text-xs break-all">
-                {model.id} ·{" "}
-                {model.custom
-                  ? "自定义"
-                  : instance.modelOverrides[model.id]
-                    ? "已覆盖"
-                    : "内置默认"}
-              </p>
-              {!model.custom && instance.modelOverrides[model.id] && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    const overrides = { ...instance.modelOverrides };
-                    delete overrides[model.id];
-                    onChange({ ...instance, modelOverrides: overrides });
-                    setEditing(null);
-                  }}
-                >
-                  恢复 {model.id} 内置默认值
-                </Button>
-              )}
-              {model.custom && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    onChange({
-                      ...instance,
-                      customModels: instance.customModels.filter((item) => item.id !== model.id),
-                      visibleModels: instance.visibleModels.filter((id) => id !== model.id),
-                    });
-                    setEditing(null);
-                  }}
-                >
-                  删除自定义模型 {model.id}
-                </Button>
-              )}
+                        customModels: instance.customModels.filter((item) => item.id !== model.id),
+                        visibleModels: instance.visibleModels.filter((id) => id !== model.id),
+                      });
+                      setEditing(null);
+                    }}
+                  >
+                    删除自定义模型 {model.id}
+                  </Button>
+                )}
+              </Item>
             </li>
           ))}
       </ul>

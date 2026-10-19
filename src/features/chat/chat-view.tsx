@@ -12,6 +12,7 @@ import { Streamdown } from "streamdown";
 import { useShallow } from "zustand/react/shallow";
 
 import { useWorkspaceUi } from "@/app/workspace-ui";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
@@ -168,22 +169,21 @@ export function ChatView({ botId }: { botId: string }) {
         </Button>
       </header>
       {(feedback.error || connection.credentialWarning) && (
-        <div
-          role="alert"
-          className="text-destructive animate-fade-in flex items-center justify-between gap-2 border-b px-5 py-3 text-sm"
-        >
-          <span>{feedback.error || connection.credentialWarning}</span>
-          {connection.runnerUnavailable && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={connection.busy}
-              onClick={() => void actions.restartRunner()}
-            >
-              重新连接
-            </Button>
-          )}
-        </div>
+        <Alert variant="destructive" className="animate-fade-in rounded-none border-x-0 border-t-0">
+          <AlertDescription className="flex items-center justify-between gap-2 px-5 py-3">
+            <span>{feedback.error || connection.credentialWarning}</span>
+            {connection.runnerUnavailable && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={connection.busy}
+                onClick={() => void actions.restartRunner()}
+              >
+                重新连接
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       {hasConversation && !connection.providerConfigured && (
         <div className="text-muted-foreground animate-fade-in flex items-center justify-between gap-2 border-b px-5 py-2 text-xs">

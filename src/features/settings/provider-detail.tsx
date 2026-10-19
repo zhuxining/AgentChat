@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import type { ProviderInstance } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { parseObject } from "@/features/settings/model-editor";
 import { CredentialSettings } from "@/features/settings/provider-credentials";
 import { ProviderModels } from "@/features/settings/provider-models";
@@ -59,6 +65,7 @@ export function ProviderDetail({
   const [modelId, setModelId] = useState(initial.visibleModels[0] ?? models[0]?.id ?? "");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const operation = useProviderOperation();
+  const ids = useId();
   const entry = catalog.find((item) => item.type === instance.type);
   const dirty =
     !saved ||
@@ -122,37 +129,35 @@ export function ProviderDetail({
           {statusMessage}
         </p>
       )}
-      <div role="group" aria-label="接入详情分类" className="flex gap-2">
-        <Button
-          variant={tab === "connection" ? "default" : "outline"}
-          aria-pressed={tab === "connection"}
-          onClick={() => setTab("connection")}
-        >
-          连接与认证
-        </Button>
-        <Button
-          variant={tab === "models" ? "default" : "outline"}
-          aria-pressed={tab === "models"}
-          onClick={() => setTab("models")}
-        >
-          模型
-        </Button>
-      </div>
+      <ToggleGroup
+        aria-label="接入详情分类"
+        value={[tab]}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next) setTab(next);
+        }}
+        variant="outline"
+      >
+        <ToggleGroupItem value="connection">连接与认证</ToggleGroupItem>
+        <ToggleGroupItem value="models">模型</ToggleGroupItem>
+      </ToggleGroup>
       {tab === "connection" ? (
         <div className="space-y-3">
-          <label className="block text-sm">
-            接入名称
+          <Field>
+            <FieldLabel htmlFor={`${ids}-name`}>接入名称</FieldLabel>
             <Input
+              id={`${ids}-name`}
               aria-label="接入名称"
               value={instance.name}
               onChange={(event) =>
                 setInstance((previous) => ({ ...previous, name: event.target.value }))
               }
             />
-          </label>
-          <label className="block text-sm">
-            稳定 ID
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-id`}>稳定 ID</FieldLabel>
             <Input
+              id={`${ids}-id`}
               aria-label="接入稳定 ID"
               disabled={saved}
               value={instance.id}
@@ -160,28 +165,29 @@ export function ProviderDetail({
                 setInstance((previous) => ({ ...previous, id: event.target.value }))
               }
             />
-            <span className="text-muted-foreground text-xs">
-              Bot 使用此 ID 引用接入；保存后不可更改。
-            </span>
-          </label>
+            <FieldDescription>Bot 使用此 ID 引用接入；保存后不可更改。</FieldDescription>
+          </Field>
           <p className="text-sm">供应商类型：{entry?.name ?? instance.type}</p>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <Field orientation="horizontal" className="gap-2">
+            <Checkbox
+              id={`${ids}-enabled`}
               aria-label="启用接入"
               checked={instance.enabled}
-              onChange={(event) =>
-                setInstance((previous) => ({ ...previous, enabled: event.target.checked }))
+              onCheckedChange={(checked) =>
+                setInstance((previous) => ({ ...previous, enabled: checked }))
               }
             />
-            启用接入
-          </label>
-          <p className="text-muted-foreground text-xs">
+            <FieldLabel htmlFor={`${ids}-enabled`} className="font-normal">
+              启用接入
+            </FieldLabel>
+          </Field>
+          <FieldDescription>
             停用后需重启生效，不能发起新的模型请求；历史会话仍可查看。
-          </p>
-          <label className="block text-sm">
-            接入地址
+          </FieldDescription>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-base-url`}>接入地址</FieldLabel>
             <Input
+              id={`${ids}-base-url`}
               aria-label="接入地址"
               type="url"
               placeholder="留空使用供应商默认端点"
@@ -193,12 +199,13 @@ export function ProviderDetail({
                 }))
               }
             />
-          </label>
-          <label className="block text-sm">
-            认证方式
-            <select
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-auth`}>认证方式</FieldLabel>
+            <NativeSelect
+              id={`${ids}-auth`}
               aria-label="认证方式"
-              className="bg-background mt-1 h-9 w-full rounded-md border px-2"
+              className="w-full"
               value={instance.auth.type}
               onChange={(event) => {
                 const type = event.target.value;
@@ -214,16 +221,16 @@ export function ProviderDetail({
               }}
             >
               {(entry?.authentication ?? [instance.auth.type]).map((type) => (
-                <option value={type} key={type}>
+                <NativeSelectOption value={type} key={type}>
                   {type === "apiKey"
                     ? "API Key"
                     : type === "oauth"
                       ? "OAuth 登录"
                       : "云环境凭据 / 无需密钥"}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </Field>
           <CredentialSettings
             key={instance.auth.type}
             instance={instance}
@@ -242,28 +249,30 @@ export function ProviderDetail({
               AWS_REGION、GOOGLE_CLOUD_PROJECT、GOOGLE_CLOUD_LOCATION 等非秘密参数。
             </p>
           )}
-          <label className="block text-sm">
-            供应商参数 JSON
+          <Field>
+            <FieldLabel htmlFor={`${ids}-parameters`}>供应商参数 JSON</FieldLabel>
             <Textarea
+              id={`${ids}-parameters`}
               aria-label="供应商参数 JSON"
               className="font-mono text-xs"
               value={parameters}
               onChange={(event) => setParameters(event.target.value)}
             />
-          </label>
-          <label className="block text-sm">
-            连接 Header JSON
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-headers`}>连接 Header JSON</FieldLabel>
             <Textarea
+              id={`${ids}-headers`}
               aria-label="连接 Header JSON"
               className="font-mono text-xs"
               value={headers}
               onChange={(event) => setHeaders(event.target.value)}
             />
-          </label>
-          <p className="text-muted-foreground text-xs">
-            参数不填写秘密值；认证 Header 请填写 ${"{credential:entry}"}{" "}
-            引用。读取失败会报告原因，不切换其他来源。
-          </p>
+            <FieldDescription>
+              参数不填写秘密值；认证 Header 请填写 ${"{credential:entry}"}{" "}
+              引用。读取失败会报告原因，不切换其他来源。
+            </FieldDescription>
+          </Field>
         </div>
       ) : (
         <ProviderModels
@@ -288,15 +297,16 @@ export function ProviderDetail({
       </div>
       <section aria-label="连接测试" className="space-y-2 rounded-lg border p-3">
         <p className="text-sm">测试使用已保存的配置（包括待生效修改），可能产生供应商费用。</p>
-        <label className="block text-sm">
-          测试模型
-          <select
+        <Field>
+          <FieldLabel htmlFor={`${ids}-test-model`}>测试模型</FieldLabel>
+          <NativeSelect
+            id={`${ids}-test-model`}
             aria-label="测试模型"
-            className="bg-background mt-1 h-9 w-full rounded-md border px-2"
+            className="w-full"
             value={modelId}
             onChange={(event) => setModelId(event.target.value)}
           >
-            <option value="">选择测试模型</option>
+            <NativeSelectOption value="">选择测试模型</NativeSelectOption>
             {[
               ...new Set([
                 ...models.map((model) => model.id),
@@ -305,12 +315,12 @@ export function ProviderDetail({
                 ),
               ]),
             ].map((id) => (
-              <option key={id} value={id}>
+              <NativeSelectOption key={id} value={id}>
                 {id}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </Field>
         <Button
           variant="outline"
           disabled={!saved || dirty || operation.isPending || !modelId}
@@ -334,16 +344,23 @@ export function ProviderDetail({
         )}
       </section>
       {references.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-sm">引用位置（{references.length}）</summary>
-          <ul className="text-muted-foreground text-xs">
-            {references.map((reference) => (
-              <li key={`${reference.kind}:${reference.id}:${reference.modelId}`}>
-                {reference.kind} {reference.id} · {reference.modelId}
-              </li>
-            ))}
-          </ul>
-        </details>
+        <Collapsible
+          defaultOpen
+          render={<section className="space-y-2" aria-label={`引用位置（${references.length}）`} />}
+        >
+          <CollapsibleTrigger className="focus-visible:ring-ring cursor-pointer rounded-md text-sm outline-none focus-visible:ring-2">
+            引用位置（{references.length}）
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="text-muted-foreground text-xs">
+              {references.map((reference) => (
+                <li key={`${reference.kind}:${reference.id}:${reference.modelId}`}>
+                  {reference.kind} {reference.id} · {reference.modelId}
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       )}
       {saved && (
         <div className="space-y-2">
@@ -386,9 +403,11 @@ export function ProviderDetail({
         </div>
       )}
       {(error || operation.error) && (
-        <p role="alert" className="text-destructive text-sm whitespace-pre-wrap">
-          {error || providerError(operation.error)}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription className="whitespace-pre-wrap">
+            {error || providerError(operation.error)}
+          </AlertDescription>
+        </Alert>
       )}
     </div>
   );

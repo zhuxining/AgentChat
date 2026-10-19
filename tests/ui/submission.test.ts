@@ -390,8 +390,8 @@ it("keeps tool selection consistent while editing and applies settings only on r
   fireEvent.click(within(details).getByRole("button", { name: "配置能力" }));
   const editor = within(await screen.findByRole("dialog", { name: "配置能力" }));
   fireEvent.click(editor.getByRole("checkbox", { name: "coding-tools" }));
-  expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).checked).toBe(false);
-  expect((editor.getByRole("checkbox", { name: /read/ }) as HTMLInputElement).disabled).toBe(true);
+  expect(editor.getByRole("checkbox", { name: /read/ }).getAttribute("aria-checked")).toBe("false");
+  expect(editor.getByRole("checkbox", { name: /read/ }).getAttribute("aria-disabled")).toBe("true");
   fireEvent.click(editor.getByRole("button", { name: "保存" }));
   await waitFor(() =>
     expect(runnerClient.updateBot).toHaveBeenCalledWith(

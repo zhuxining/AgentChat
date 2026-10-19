@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ProviderInstance } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { ProviderDetail } from "@/features/settings/provider-detail";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
 import { providerError, providerQueryKey, useProviders } from "@/features/settings/use-providers";
@@ -74,9 +76,9 @@ export function ProviderSettings() {
   if (query.error || !data)
     return (
       <SettingsSectionCard title="模型供应商">
-        <p role="alert" className="text-destructive text-sm">
-          {providerError(query.error)}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{providerError(query.error)}</AlertDescription>
+        </Alert>
         <p className="text-muted-foreground text-xs">如果后台版本较旧，请重新启动后台后重试。</p>
         <Button onClick={() => void query.refetch()}>重新读取供应商</Button>
       </SettingsSectionCard>
@@ -182,32 +184,43 @@ export function ProviderSettings() {
                 )
                 .map(({ instance, status, message }) => (
                   <li key={instance.id}>
-                    <button
-                      type="button"
-                      className="hover:bg-accent focus-visible:ring-ring w-full space-y-1 rounded-lg border p-3 text-left focus-visible:ring-2"
-                      onClick={() => {
-                        setSelectedId(instance.id);
-                        setSearch("");
-                        setNotice("");
-                      }}
+                    <Item
+                      variant="outline"
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedId(instance.id);
+                            setSearch("");
+                            setNotice("");
+                          }}
+                        />
+                      }
+                      className="hover:bg-muted w-full text-left"
                     >
-                      <p className="text-sm font-medium">{instance.name}</p>
-                      <p className="text-muted-foreground text-xs">
-                        {instance.type} ·{" "}
-                        {
+                      <ItemContent>
+                        <ItemTitle>{instance.name}</ItemTitle>
+                        <ItemDescription className="text-xs">
+                          {instance.type} ·{" "}
                           {
-                            configured: "配置完整",
-                            missing: "凭据缺失",
-                            disabled: "已停用",
-                            error: "配置错误",
-                          }[status]
-                        }
-                      </p>
-                      <p className="text-muted-foreground text-xs break-all">
-                        {addressSummary(instance.baseUrl)}
-                      </p>
-                      {message && <p className="text-xs">{message}</p>}
-                    </button>
+                            {
+                              configured: "配置完整",
+                              missing: "凭据缺失",
+                              disabled: "已停用",
+                              error: "配置错误",
+                            }[status]
+                          }
+                        </ItemDescription>
+                        <ItemDescription className="text-xs break-all">
+                          {addressSummary(instance.baseUrl)}
+                        </ItemDescription>
+                        {message && (
+                          <ItemDescription className="text-foreground text-xs">
+                            {message}
+                          </ItemDescription>
+                        )}
+                      </ItemContent>
+                    </Item>
                   </li>
                 ))}
             </ul>
@@ -245,7 +258,11 @@ export function ProviderSettings() {
               确认重新启动
             </Button>
           </DialogFooter>
-          {feedback.error && <p role="alert">{feedback.error}</p>}
+          {feedback.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{feedback.error}</AlertDescription>
+            </Alert>
+          )}
         </DialogContent>
       </Dialog>
     </div>

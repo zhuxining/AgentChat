@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import type { ConfigurationFile } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { useRunnerActions } from "@/features/settings/use-runner-actions";
 
@@ -12,6 +15,7 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
   const [content, setContent] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const ids = useId();
   const canRead = files.includes(path);
   const canSave = loaded?.path === path && canRead && content !== loaded.content;
 
@@ -54,11 +58,12 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
 
   return (
     <div className="space-y-3">
-      <label className="block space-y-2 text-sm">
-        可编辑文件
-        <select
+      <Field>
+        <FieldLabel htmlFor={`${ids}-path`}>可编辑文件</FieldLabel>
+        <NativeSelect
+          id={`${ids}-path`}
           aria-label="配置文件路径"
-          className="bg-background h-9 w-full rounded-md border px-2"
+          className="w-full"
           value={path}
           disabled={disabled || pending}
           onChange={(event) => {
@@ -69,16 +74,16 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
           }}
         >
           {files.map((file) => (
-            <option key={file} value={file}>
+            <NativeSelectOption key={file} value={file}>
               {file}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-      </label>
-      <p className="text-muted-foreground text-xs leading-5">
-        仅显示 Runner
-        允许访问的配置文件。重新读取会丢弃当前草稿；保存会检查内容版本，防止覆盖外部编辑。
-      </p>
+        </NativeSelect>
+        <FieldDescription>
+          仅显示 Runner
+          允许访问的配置文件。重新读取会丢弃当前草稿；保存会检查内容版本，防止覆盖外部编辑。
+        </FieldDescription>
+      </Field>
       <Button
         variant="outline"
         disabled={disabled || pending || !canRead}
@@ -104,14 +109,14 @@ export function ConfigurationEditor({ files, disabled }: { files: string[]; disa
           </Button>
         </>
       )}
-      <p className="text-muted-foreground text-xs leading-5">
+      <FieldDescription>
         JSON 配置中的凭据只填写 credentialRef 引用。API 密钥请使用 Provider
         页面的安全保存入口。保存并重载后的 Bot 配置用于后续执行；已有执行需显式应用。
-      </p>
+      </FieldDescription>
       {(actions.error || error) && (
-        <p role="alert" className="text-destructive text-sm">
-          {actions.error || error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{actions.error || error}</AlertDescription>
+        </Alert>
       )}
     </div>
   );

@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useBotChat } from "@/features/chat/use-bot-chat";
@@ -16,9 +17,9 @@ export function GoalEditor() {
       }}
     >
       {operationError && (
-        <p role="alert" className="text-destructive text-sm">
-          {operationError}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{operationError}</AlertDescription>
+        </Alert>
       )}
       <Textarea
         aria-label="工作目标"

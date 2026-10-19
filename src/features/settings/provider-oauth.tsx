@@ -3,8 +3,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 
 import { runnerClient } from "@/app/runner-client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   providerError,
   providerQueryKey,
@@ -106,7 +109,11 @@ export function OAuthSettings({
               在系统浏览器打开授权页面
             </Button>
           )}
-          {login.error && <p role="alert">{login.error}</p>}
+          {login.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{login.error}</AlertDescription>
+            </Alert>
+          )}
           {pending && login.prompt && (
             <form
               className="space-y-2"
@@ -123,25 +130,27 @@ export function OAuthSettings({
                 );
               }}
             >
-              <label className="block">
-                {login.prompt.message}
+              <Field>
+                <FieldLabel htmlFor="oauth-response">{login.prompt.message}</FieldLabel>
                 {login.prompt.type === "select" ? (
-                  <select
+                  <NativeSelect
+                    id="oauth-response"
                     aria-label="OAuth 授权响应"
-                    className="bg-background h-9 w-full rounded-md border px-2"
+                    className="w-full"
                     value={response}
                     onChange={(event) => setResponse(event.target.value)}
                   >
-                    <option value="">请选择</option>
+                    <NativeSelectOption value="">请选择</NativeSelectOption>
                     {login.prompt.options?.map((option) => (
-                      <option key={option.id} value={option.id}>
+                      <NativeSelectOption key={option.id} value={option.id}>
                         {option.label}
                         {option.description ? ` · ${option.description}` : ""}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
+                  </NativeSelect>
                 ) : (
                   <Input
+                    id="oauth-response"
                     aria-label="OAuth 授权响应"
                     type={login.prompt.type === "text" ? "text" : "password"}
                     autoComplete="off"
@@ -150,7 +159,7 @@ export function OAuthSettings({
                     onChange={(event) => setResponse(event.target.value)}
                   />
                 )}
-              </label>
+              </Field>
               <Button
                 type="submit"
                 disabled={operation.isPending || (!response && !login.prompt.allowEmpty)}
@@ -181,9 +190,11 @@ export function OAuthSettings({
         </Button>
       )}
       {(error || operation.error || query.error) && (
-        <p role="alert" className="text-destructive text-sm">
-          {error || providerError(operation.error ?? query.error)}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>
+            {error || providerError(operation.error ?? query.error)}
+          </AlertDescription>
+        </Alert>
       )}
     </section>
   );

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { runnerClient } from "@/app/runner-client";
 import { runnerKeys } from "@/app/runner-queries";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -79,9 +80,9 @@ export function RuntimeGate({ children }: { children: ReactNode }) {
             <span>{message || "正在检查 Node 运行环境…"}</span>
           </div>
         ) : (
-          <div className="bg-muted rounded-md p-3 text-sm leading-6" role="alert">
-            {message}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription className="leading-6">{message}</AlertDescription>
+          </Alert>
         )}
         {phase === "failed" && (
           <div className="flex justify-end">
