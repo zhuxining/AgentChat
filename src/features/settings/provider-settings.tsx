@@ -12,11 +12,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderDetail } from "@/features/settings/provider-detail";
+import { ProviderForm } from "@/features/settings/provider-form";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
-import { providerError, providerQueryKey, useProviders } from "@/features/settings/use-providers";
+import {
+  providerError,
+  providerQueryKey,
+  useProviderOperation,
+  useProviders,
+} from "@/features/settings/use-providers";
 import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
 import type { ProviderCatalogEntry, ProviderTestResult } from "../../../contracts/providers";
@@ -31,7 +38,7 @@ export function addressSummary(address?: string) {
   }
 }
 
-function newInstance(entry: ProviderCatalogEntry): ProviderInstance {
+function newInstance(entry: ProviderCatalogEntry, custom = false): ProviderInstance {
   const id = `${entry.type}-${crypto.randomUUID().slice(0, 8)}`;
   const auth = entry.authentication[0];
   return {
@@ -39,12 +46,13 @@ function newInstance(entry: ProviderCatalogEntry): ProviderInstance {
     name: entry.name,
     type: entry.type,
     enabled: true,
+    ...(custom ? { custom: true } : {}),
     auth:
       auth === "oauth"
         ? { type: "oauth", source: { type: "keyring", entry: id } }
         : auth === "ambient"
           ? { type: "ambient" }
-          : { type: "apiKey", source: { type: "keyring", entry: id } },
+          : { type: "apiKey", source: { type: "keyring", entry: id }, useEnvironment: true },
     visibleModels: [],
     modelOverrides: {},
     customModels: [],
@@ -54,18 +62,27 @@ function newInstance(entry: ProviderCatalogEntry): ProviderInstance {
 export function ProviderSettings() {
   const { connection, actions, feedback } = useRunnerSettings();
   const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
   const [selectedId, setSelectedId] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState("builtin");
   const [newDraft, setNewDraft] = useState<ProviderInstance | null>(null);
-  const [search, setSearch] = useState("");
   const [tests, setTests] = useState<Record<string, ProviderTestResult>>({});
   const [restart, setRestart] = useState(false);
   const [notice, setNotice] = useState("");
-  const query = useProviders(selectedId || undefined, newDraft?.type);
+  const [removing, setRemoving] = useState<ProviderInstance | null>(null);
+  const [removeError, setRemoveError] = useState("");
+  const operation = useProviderOperation();
+  const query = useProviders();
   const data = query.data;
+  const connections =
+    data?.instances?.filter((item) => Boolean(item.instance.custom) === (mode === "custom")) ?? [];
   const status = data?.instances?.find((item) => item.instance.id === selectedId);
   const instance = status?.instance ?? newDraft;
-  const needle = search.toLowerCase();
+  const detailQuery = useProviders(
+    instance?.id && status ? instance.id : undefined,
+    instance?.type,
+  );
+  const Detail = mode === "custom" ? ProviderDetail : ProviderForm;
 
   if (query.isPending)
     return (
@@ -101,137 +118,282 @@ export function ProviderSettings() {
           {notice}
         </p>
       )}
-      {instance ? (
+      {!editing ? (
+        <section aria-label="已连接供应商" className="space-y-4">
+          <p className="text-muted-foreground text-sm">填入各提供商的认证凭证即可使用其模型。</p>
+          <ul aria-label="已连接供应商" className="space-y-3">
+            {data.instances?.map(({ instance: connection, status: connectionStatus }) => (
+              <li key={connection.id}>
+                <Item variant="outline" className="flex-nowrap rounded-xl p-4">
+                  <ItemContent>
+                    <ItemTitle className="flex-wrap">
+                      {connection.name}
+                      {connection.custom && (
+                        <span className="text-muted-foreground rounded border px-1.5 text-xs font-normal">
+                          自定义
+                        </span>
+                      )}
+                      <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs font-normal">
+                        <span
+                          aria-hidden="true"
+                          className={
+                            connectionStatus === "configured"
+                              ? "bg-primary size-2 rounded-full"
+                              : "bg-muted-foreground size-2 rounded-full"
+                          }
+                        />
+                        {
+                          {
+                            configured: connection.auth.type === "oauth" ? "已登录" : "已配置",
+                            missing: "待配置凭据",
+                            disabled: "已停用",
+                            error: "配置异常",
+                          }[connectionStatus]
+                        }
+                      </span>
+                    </ItemTitle>
+                    <ItemDescription className="text-xs break-all">
+                      {addressSummary(connection.baseUrl)}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={`编辑 ${connection.name}`}
+                      onClick={() => {
+                        setMode(connection.custom ? "custom" : "builtin");
+                        setSelectedId(connection.id);
+                        setNewDraft(null);
+                        setNotice("");
+                        setEditing(true);
+                      }}
+                    >
+                      编辑
+                    </Button>
+                    {connection.custom && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        aria-label={`删除 ${connection.name}`}
+                        onClick={() => {
+                          setRemoving(connection);
+                          setRemoveError("");
+                        }}
+                      >
+                        删除
+                      </Button>
+                    )}
+                  </ItemActions>
+                </Item>
+              </li>
+            ))}
+          </ul>
+          {!data.instances?.length && (
+            <p className="text-muted-foreground text-sm">尚未添加模型提供商。</p>
+          )}
+          <Button
+            variant="outline"
+            className="h-12 w-full border-dashed"
+            onClick={() => {
+              setSelectedId("");
+              setNewDraft(null);
+              setMode("builtin");
+              setNotice("");
+              setEditing(true);
+            }}
+          >
+            ＋ 添加模型提供商
+          </Button>
+        </section>
+      ) : (
         <>
           <Button
             variant="ghost"
             onClick={() => {
+              setEditing(false);
               setSelectedId("");
               setNewDraft(null);
-              setAdding(false);
-              setSearch("");
             }}
           >
-            返回接入列表
+            返回已连接列表
           </Button>
-          <ProviderDetail
-            key={`${instance.id}:${data.version}`}
-            initial={instance}
-            saved={!!status}
-            version={data.version}
-            models={data.models ?? []}
-            catalog={data.catalog ?? []}
-            references={data.references ?? []}
-            configured={status?.configured ?? false}
-            statusMessage={status?.message}
-            test={tests[instance.id]}
-            onSaved={(id) => {
-              setSelectedId(id);
-              setNewDraft(null);
-              setNotice("接入已保存，重启后台后生效。尚未就绪的凭据请继续配置。");
+          <ToggleGroup
+            aria-label="供应商配置类型"
+            value={[mode]}
+            onValueChange={(value) => {
+              if (value[0] && value[0] !== mode) {
+                setMode(value[0]);
+                setSelectedId("");
+                setNewDraft(null);
+                setNotice("");
+              }
             }}
-            onRemove={() => {
-              setSelectedId("");
-              setNewDraft(null);
-              setNotice("接入已删除，重启后台后生效。");
-            }}
-            onTest={(test) => setTests((previous) => ({ ...previous, [test.instanceId]: test }))}
-          />
-        </>
-      ) : (
-        <SettingsSectionCard title={adding ? "选择内置供应商" : "接入实例"}>
-          <div className="flex gap-2">
-            <Input
-              aria-label={adding ? "搜索内置供应商" : "搜索接入实例"}
-              placeholder={adding ? "搜索供应商名称" : "搜索接入名称或供应商类型"}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <Button
-              variant={adding ? "outline" : "default"}
-              onClick={() => {
-                setAdding((value) => !value);
-                setSearch("");
+            variant="outline"
+          >
+            <ToggleGroupItem value="builtin">第三方模型提供商</ToggleGroupItem>
+            <ToggleGroupItem value="custom">自定义模型 API</ToggleGroupItem>
+          </ToggleGroup>
+          <p className="text-muted-foreground text-sm">
+            {mode === "builtin"
+              ? "从内置目录中选择提供商，填入其认证凭证即可使用。"
+              : "选择兼容的提供商协议，配置自定义 API 地址与模型。"}
+          </p>
+          <div className="space-y-2">
+            <label htmlFor="provider-type" className="text-sm font-medium">
+              提供商
+            </label>
+            <NativeSelect
+              id="provider-type"
+              aria-label="提供商"
+              value={instance?.type ?? ""}
+              onChange={(event) => {
+                const entry = data.catalog?.find((item) => item.type === event.target.value);
+                if (!entry) return;
+                const existing = selectedId
+                  ? connections.find((item) => item.instance.type === entry.type)
+                  : undefined;
+                setSelectedId(existing?.instance.id ?? "");
+                setNewDraft(existing ? null : newInstance(entry, mode === "custom"));
+                setNotice("");
               }}
             >
-              {adding ? "取消添加" : "添加接入"}
-            </Button>
+              <NativeSelectOption value="" disabled>
+                选择提供商
+              </NativeSelectOption>
+              {data.catalog?.map((entry) => (
+                <NativeSelectOption key={entry.type} value={entry.type}>
+                  {entry.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
           </div>
-          {adding ? (
-            <ul aria-label="内置供应商" className="max-h-96 space-y-1 overflow-auto">
-              {data.catalog
-                ?.filter((entry) => `${entry.type} ${entry.name}`.toLowerCase().includes(needle))
-                .map((entry) => (
-                  <li key={entry.type}>
-                    <Button
-                      variant="ghost"
-                      className="h-auto w-full justify-start whitespace-normal"
-                      onClick={() => {
-                        setNewDraft(newInstance(entry));
-                        setAdding(false);
-                      }}
-                    >
-                      {entry.name} · {entry.type} · {entry.modelCount} 个模型
-                    </Button>
-                  </li>
-                ))}
-            </ul>
-          ) : (
-            <ul aria-label="接入实例列表" className="space-y-2">
-              {data.instances
-                ?.filter(({ instance }) =>
-                  `${instance.name} ${instance.type}`.toLowerCase().includes(needle),
-                )
-                .map(({ instance, status, message }) => (
-                  <li key={instance.id}>
-                    <Item
-                      variant="outline"
-                      render={
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedId(instance.id);
-                            setSearch("");
-                            setNotice("");
-                          }}
-                        />
-                      }
-                      className="hover:bg-muted w-full text-left"
-                    >
-                      <ItemContent>
-                        <ItemTitle>{instance.name}</ItemTitle>
-                        <ItemDescription className="text-xs">
-                          {instance.type} ·{" "}
-                          {
-                            {
-                              configured: "配置完整",
-                              missing: "凭据缺失",
-                              disabled: "已停用",
-                              error: "配置错误",
-                            }[status]
-                          }
-                        </ItemDescription>
-                        <ItemDescription className="text-xs break-all">
-                          {addressSummary(instance.baseUrl)}
-                        </ItemDescription>
-                        {message && (
-                          <ItemDescription className="text-foreground text-xs">
-                            {message}
-                          </ItemDescription>
-                        )}
-                      </ItemContent>
-                    </Item>
-                  </li>
-                ))}
-            </ul>
+          {instance && (
+            <div className="space-y-2">
+              {connections.filter((item) => item.instance.type === instance.type).length > 1 && (
+                <NativeSelect
+                  aria-label="选择连接"
+                  value={instance.id}
+                  onChange={(event) => {
+                    setSelectedId(event.target.value);
+                    setNewDraft(null);
+                  }}
+                >
+                  {connections
+                    .filter((item) => item.instance.type === instance.type)
+                    .map((item) => (
+                      <NativeSelectOption key={item.instance.id} value={item.instance.id}>
+                        {item.instance.name}
+                      </NativeSelectOption>
+                    ))}
+                </NativeSelect>
+              )}
+              {mode === "custom" && status && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const entry = data.catalog?.find((item) => item.type === instance.type);
+                    if (entry) {
+                      setSelectedId("");
+                      setNewDraft(newInstance(entry, true));
+                    }
+                  }}
+                >
+                  添加其他账号或连接
+                </Button>
+              )}
+            </div>
           )}
-          {!adding && !data.instances?.length && (
-            <p className="text-muted-foreground text-sm">
-              尚未建立接入，添加供应商后选择认证方式与模型。
+          {instance && detailQuery.isPending ? (
+            <p role="status" className="text-muted-foreground text-sm">
+              正在读取模型目录…
             </p>
+          ) : instance && detailQuery.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {providerError(detailQuery.error)}
+                <Button variant="ghost" onClick={() => void detailQuery.refetch()}>
+                  重新读取模型目录
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : instance ? (
+            <Detail
+              key={`${instance.id}:${data.version}`}
+              initial={instance}
+              saved={!!status}
+              version={data.version}
+              models={detailQuery.data?.models ?? []}
+              catalog={detailQuery.data?.catalog ?? data.catalog ?? []}
+              references={detailQuery.data?.references ?? []}
+              configured={status?.configured ?? false}
+              statusMessage={status?.message}
+              test={tests[instance.id]}
+              onSaved={(id) => {
+                setSelectedId(id);
+                setNewDraft(null);
+                setNotice("配置已保存，重启后台后生效。");
+              }}
+              onRemove={() => {
+                setSelectedId("");
+                setNewDraft(null);
+                setNotice("接入已删除，重启后台后生效。");
+                setEditing(false);
+              }}
+              onTest={(test) => setTests((previous) => ({ ...previous, [test.instanceId]: test }))}
+            />
+          ) : (
+            <p className="text-muted-foreground text-sm">选择提供商后配置凭证。</p>
           )}
-        </SettingsSectionCard>
+        </>
       )}
+      <Dialog
+        open={!!removing}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除模型提供商</DialogTitle>
+            <DialogDescription>
+              确定删除“{removing?.name}”？被 Bot 或会话引用的连接无法删除。
+            </DialogDescription>
+          </DialogHeader>
+          {removeError && (
+            <Alert variant="destructive">
+              <AlertDescription>{removeError}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoving(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={operation.isPending}
+              onClick={async () => {
+                if (!removing) return;
+                try {
+                  await operation.mutateAsync({
+                    action: "remove",
+                    expectedVersion: data.version,
+                    instanceId: removing.id,
+                  });
+                  setRemoving(null);
+                  setNotice("连接已删除，重启后台后生效。");
+                } catch (cause) {
+                  setRemoveError(providerError(cause));
+                }
+              }}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={restart} onOpenChange={setRestart}>
         <DialogContent>
           <DialogHeader>

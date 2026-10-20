@@ -5,7 +5,7 @@ export type CredentialSource =
   | { type: "env"; variable: string }
   | { type: "file"; path: string; entry: string };
 export type ProviderAuthentication =
-  | { type: "apiKey"; source: CredentialSource }
+  | { type: "apiKey"; source: CredentialSource; useEnvironment?: boolean }
   | { type: "oauth"; source: { type: "keyring"; entry: string } }
   | { type: "ambient" };
 /** Values in headers must be public literals or ${credential:entry} references. */
@@ -14,6 +14,8 @@ export type ProviderInstance = {
   name: string;
   type: string;
   enabled: boolean;
+  /** User-defined API connection; uses the selected supplier as its protocol adapter. */
+  custom?: boolean;
   baseUrl?: string;
   headers?: Record<string, string>;
   auth: ProviderAuthentication;
@@ -29,6 +31,12 @@ export type ProviderCatalogEntry = {
   authentication: ("apiKey" | "oauth" | "ambient")[];
   modelCount: number;
   apis: string[];
+  environment?: {
+    variables: string[];
+    detected: string[];
+    configured?: boolean;
+    detectionError?: boolean;
+  };
 };
 export type ProviderInstanceStatus = {
   instance: ProviderInstance;

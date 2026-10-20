@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
   lazyStream,
   type AssistantMessageEventStream,
@@ -9,8 +13,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { ProviderInstance } from "../../contracts/providers.js";
 import { localNativeAdapter } from "../src/communication/native.js";
+import { Configuration } from "../src/config/configuration.js";
 import { createInstanceRuntime, effectiveModels, modelViews } from "../src/providers/runtime.js";
 import { parseInstance } from "../src/providers/schema.js";
+import { ProviderService } from "../src/providers/service.js";
 
 const BASE_MODEL: Model<"openai-completions"> = {
   id: "m1",
@@ -83,6 +89,149 @@ async function dispatch(
 }
 
 describe("provider instances", () => {
+  it("reports environment names without exposing credentials in the settings response", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "agentchat-provider-settings-"));
+    try {
+      const configuration = await Configuration.open(dataDir);
+      const service = new ProviderService(
+        configuration,
+        localNativeAdapter({ DEEPSEEK_API_KEY: "private-environment-key" }),
+        () => undefined,
+        async () => [],
+      );
+      const response = await service.request({ action: "list", type: "deepseek" });
+      expect(response.catalog?.find((entry) => entry.type === "deepseek")?.environment).toEqual({
+        variables: ["DEEPSEEK_API_KEY"],
+        detected: ["DEEPSEEK_API_KEY"],
+      });
+      expect(JSON.stringify(response)).not.toContain("private-environment-key");
+      const missing = new ProviderService(
+        configuration,
+        localNativeAdapter({}),
+        () => undefined,
+        async () => [],
+      );
+      const empty = await missing.request({ action: "list", type: "deepseek" });
+      expect(
+        empty.catalog?.find((entry) => entry.type === "deepseek")?.environment?.detected,
+      ).toEqual([]);
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+  it("keeps the settings list available when environment detection fails", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "agentchat-provider-detection-"));
+    try {
+      const configuration = await Configuration.open(dataDir);
+      const runner = configuration.runner;
+      if (!runner) throw new Error("runner configuration unavailable");
+      const providers = {
+        ...runner.providers,
+        deepseek: {
+          ...instance({ id: "deepseek" }),
+          auth: {
+            type: "apiKey" as const,
+            source: { type: "keyring" as const, entry: "deepseek" },
+          },
+        },
+      };
+      await configuration.saveConfiguration(
+        "runner.json",
+        (await configuration.readConfiguration("runner.json")).version,
+        `${JSON.stringify({ ...runner, schemaVersion: 2, providers }, null, 2)}\n`,
+      );
+      const service = new ProviderService(
+        configuration,
+        {
+          ...localNativeAdapter({}),
+          async env() {
+            throw new Error("environment bridge unavailable");
+          },
+        },
+        () => undefined,
+        async () => [],
+      );
+      const response = await service.request({ action: "list", type: "deepseek" });
+      expect(response.catalog?.some((entry) => entry.type === "deepseek")).toBe(true);
+      expect(response.instances?.[0]?.status).toBe("missing");
+      expect(
+        response.catalog?.find((entry) => entry.type === "deepseek")?.environment?.detectionError,
+      ).toBe(true);
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mark cloud credentials missing when the public resolver accepts them", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "agentchat-provider-cloud-auth-"));
+    try {
+      const configuration = await Configuration.open(dataDir);
+      const service = new ProviderService(
+        configuration,
+        localNativeAdapter({
+          AWS_PROFILE: "work",
+          GOOGLE_CLOUD_API_KEY: "private-google-key",
+        }),
+        () => undefined,
+        async () => [],
+      );
+      const bedrock = await service.request({ action: "list", type: "amazon-bedrock" });
+      expect(
+        bedrock.catalog?.find((entry) => entry.type === "amazon-bedrock")?.environment,
+      ).toMatchObject({
+        configured: true,
+      });
+      const vertex = await service.request({ action: "list", type: "google-vertex" });
+      expect(
+        vertex.catalog?.find((entry) => entry.type === "google-vertex")?.environment,
+      ).toMatchObject({
+        configured: true,
+      });
+      expect(JSON.stringify(vertex)).not.toContain("private-google-key");
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the supplier environment only when opted in and prefers stored keys", async () => {
+    const native = localNativeAdapter({ DEEPSEEK_API_KEY: "environment-key" });
+    const item = instance({
+      id: "simple",
+      auth: { type: "apiKey", source: { type: "keyring", entry: "simple" }, useEnvironment: true },
+    });
+    const runtime = createInstanceRuntime([item], native);
+    expect((await runtime.models.getAuth("simple"))?.auth.apiKey).toBe("environment-key");
+    await runtime.credentials.modify("simple", async () => ({
+      type: "api_key",
+      key: "stored-key",
+    }));
+    expect((await runtime.models.getAuth("simple"))?.auth.apiKey).toBe("stored-key");
+    await runtime.credentials.delete("simple");
+    expect((await runtime.models.getAuth("simple"))?.auth.apiKey).toBe("environment-key");
+    const explicit = createInstanceRuntime(
+      [
+        instance({
+          id: "explicit",
+          auth: { type: "apiKey", source: { type: "keyring", entry: "missing" } },
+        }),
+      ],
+      native,
+    );
+    expect(await explicit.models.getAuth("explicit")).toBeUndefined();
+    expect(() =>
+      parseInstance(
+        instance({
+          id: "invalid",
+          auth: {
+            type: "apiKey",
+            source: { type: "env", variable: "MISSING" },
+            useEnvironment: true,
+          },
+        }),
+      ),
+    ).toThrow("供应商配置无效");
+  });
+
   it("keeps two instances of one supplier on their own endpoint and credential", async () => {
     const seenA: { model?: Model<"openai-completions">; apiKey?: string } = {};
     const seenB: typeof seenA = {};

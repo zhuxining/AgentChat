@@ -15,11 +15,13 @@ export function ProviderModels({
   models,
   apis,
   onChange,
+  allowBuiltinEditing = false,
 }: {
   instance: ProviderInstance;
   saved: boolean;
   models: ProviderModel[];
   apis: string[];
+  allowBuiltinEditing?: boolean;
   onChange: (instance: ProviderInstance) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -134,14 +136,16 @@ export function ProviderModels({
                           : "内置默认"}
                     </ItemDescription>
                   </ItemContent>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label={`编辑模型 ${model.id}`}
-                    onClick={() => setEditing(model)}
-                  >
-                    编辑
-                  </Button>
+                  {(model.custom || allowBuiltinEditing) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-label={`编辑模型 ${model.id}`}
+                      onClick={() => setEditing(model)}
+                    >
+                      编辑
+                    </Button>
+                  )}
                 </div>
                 {!model.custom && instance.modelOverrides[model.id] && (
                   <Button

@@ -78,11 +78,16 @@ const InstanceSchema = Type.Object(
     name: text,
     type: text,
     enabled: Type.Boolean(),
+    custom: Type.Optional(Type.Boolean()),
     baseUrl: Type.Optional(text),
     headers: Type.Optional(headers),
     auth: Type.Union([
       Type.Object(
-        { type: Type.Literal("apiKey"), source: CredentialSourceSchema },
+        {
+          type: Type.Literal("apiKey"),
+          source: CredentialSourceSchema,
+          useEnvironment: Type.Optional(Type.Boolean()),
+        },
         { additionalProperties: false },
       ),
       Type.Object(
@@ -194,6 +199,12 @@ export function parseInstance(value: unknown): ProviderInstance {
     (instance.auth.type === "oauth" && !provider.auth.oauth) ||
     (instance.auth.type === "apiKey" && !provider.auth.apiKey) ||
     (instance.auth.type === "ambient" && !ambientProviders.has(instance.type))
+  )
+    fail();
+  if (
+    instance.auth.type === "apiKey" &&
+    instance.auth.useEnvironment &&
+    instance.auth.source.type !== "keyring"
   )
     fail();
   if (instance.auth.type !== "ambient") validateSource(instance.auth.source);

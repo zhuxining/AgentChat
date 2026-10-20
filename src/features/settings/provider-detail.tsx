@@ -14,6 +14,7 @@ import { parseObject } from "@/features/settings/model-editor";
 import { CredentialSettings } from "@/features/settings/provider-credentials";
 import { ProviderModels } from "@/features/settings/provider-models";
 import { OAuthSettings } from "@/features/settings/provider-oauth";
+import { validateProviderBaseUrl } from "@/features/settings/provider-url";
 import { providerError, useProviderOperation } from "@/features/settings/use-providers";
 
 import type {
@@ -78,11 +79,7 @@ export function ProviderDetail({
     try {
       if (!instance.name.trim() || !instance.id.trim())
         throw new Error("请填写接入名称与稳定 ID。");
-      if (instance.baseUrl) {
-        const url = new URL(instance.baseUrl);
-        if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
-          throw new Error("接入地址必须为 HTTP/HTTPS，不能含用户名或密码。");
-      }
+      validateProviderBaseUrl(instance.baseUrl);
       const result = await operation.mutateAsync({
         action: "save",
         expectedVersion: version,
@@ -276,6 +273,7 @@ export function ProviderDetail({
         </div>
       ) : (
         <ProviderModels
+          allowBuiltinEditing
           instance={instance}
           saved={saved}
           models={models}

@@ -35,6 +35,7 @@ const initial: ProviderInstance = {
   name: "公司网关",
   type: "openai",
   enabled: true,
+  custom: true,
   auth: { type: "apiKey", source: { type: "keyring", entry: "company" } },
   visibleModels: ["model-a"],
   modelOverrides: {},
@@ -142,21 +143,198 @@ function mount(element: ReactNode = createElement(ProviderSettings)) {
   );
 }
 async function openInstance() {
-  fireEvent.click(await screen.findByRole("button", { name: /公司网关/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
   return screen.findByLabelText("接入名称");
 }
+
+it("offers model testing but no delete action for built-in connections", async () => {
+  delete instance.custom;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
+  expect(await screen.findByLabelText("测试模型")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "测试已保存配置" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "删除连接" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "测试已保存配置" }));
+  expect(await screen.findByText("连接测试成功")).toBeTruthy();
+});
+
+it("keeps every saved connection visible and opens its matching configuration", async () => {
+  const personal: ProviderInstance = {
+    ...structuredClone(initial),
+    id: "personal",
+    name: "个人 OpenAI",
+    custom: false,
+  };
+  const deepseek: ProviderInstance = {
+    ...personal,
+    id: "deepseek-work",
+    name: "工作 DeepSeek",
+    type: "deepseek",
+  };
+  configuredInstances = [personal, deepseek, instance];
+  mount();
+  const list = within(await screen.findByRole("list", { name: "已连接供应商" }));
+  expect(list.getAllByRole("button", { name: /^编辑 / })).toHaveLength(3);
+  fireEvent.click(list.getByRole("button", { name: /工作 DeepSeek/ }));
+  await waitFor(() =>
+    expect((screen.getByLabelText("提供商") as HTMLSelectElement).value).toBe("deepseek"),
+  );
+  expect(await screen.findByLabelText("API 密钥")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "返回已连接列表" }));
+  fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
+  expect(((await screen.findByLabelText("接入名称")) as HTMLInputElement).value).toBe("公司网关");
+  expect(screen.getByRole("button", { name: "自定义模型 API" }).getAttribute("aria-pressed")).toBe(
+    "true",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "返回已连接列表" }));
+  expect(
+    within(screen.getByRole("list", { name: "已连接供应商" })).getAllByRole("button", {
+      name: /^编辑 /,
+    }),
+  ).toHaveLength(3);
+});
+
+it("protects referenced custom connections when deleting from the connected list", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "删除 公司网关" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "删除模型提供商" }));
+  expect(
+    vi
+      .mocked(runnerClient.providerRequest)
+      .mock.calls.some(([request]) => request.action === "remove"),
+  ).toBe(false);
+  fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+  expect(await dialog.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "仍被 Bot bot-1 和会话 41 引用",
+  );
+  fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+  expect(await screen.findByRole("button", { name: "编辑 公司网关" })).toBeTruthy();
+});
+
+it("keeps built-in configuration focused on credentials and model selection", async () => {
+  delete instance.custom;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
+  expect(await screen.findByLabelText("API 密钥")).toBeTruthy();
+  expect(screen.queryByLabelText("接入稳定 ID")).toBeNull();
+  expect(screen.queryByLabelText("供应商参数 JSON")).toBeNull();
+  expect(screen.queryByRole("button", { name: "编辑模型 model-a" })).toBeNull();
+  expect(screen.queryByLabelText("API 地址")).toBeNull();
+  fireEvent.change(screen.getByLabelText("API 密钥"), { target: { value: "new-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await waitFor(() =>
+    expect(runnerClient.providerRequest).toHaveBeenCalledWith({
+      action: "writeCredential",
+      instanceId: "company",
+      value: "new-secret",
+    }),
+  );
+  await waitFor(() =>
+    expect((screen.getByLabelText("API 密钥") as HTMLInputElement).value).toBe(""),
+  );
+  expect(JSON.stringify(instance)).not.toContain("new-secret");
+});
+
+it("keeps credentials and model drafts when credential storage fails after creating a connection", async () => {
+  configuredInstances = [];
+  configured = false;
+  let failWrite = true;
+  vi.mocked(runnerClient.providerRequest).mockImplementation(async (request) => {
+    if (request.action === "writeCredential" && failWrite) throw new Error("系统凭据库不可用");
+    return handle(request);
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: /添加模型提供商/ }));
+  fireEvent.change(await screen.findByLabelText("提供商"), { target: { value: "deepseek" } });
+  const key = await screen.findByLabelText("API 密钥");
+  fireEvent.change(key, { target: { value: "retry-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "系统凭据库不可用");
+  expect((screen.getByLabelText("API 密钥") as HTMLInputElement).value).toBe("retry-secret");
+  expect(instance.visibleModels).toEqual(["model-a"]);
+  failWrite = false;
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await waitFor(() =>
+    expect((screen.getByLabelText("API 密钥") as HTMLInputElement).value).toBe(""),
+  );
+  expect(instance.visibleModels).toEqual(["model-a"]);
+  expect(instance.auth).toMatchObject({ useEnvironment: true, source: { type: "keyring" } });
+});
+
+it("shows cloud environment authentication status", async () => {
+  configuredInstances = [];
+  vi.mocked(runnerClient.providerRequest).mockImplementation(async (request) => {
+    if (request.action === "list" && request.type === "openai") {
+      return {
+        ...reply(),
+        catalog: [
+          {
+            type: "openai",
+            name: "OpenAI",
+            authentication: ["apiKey", "oauth", "ambient"],
+            modelCount: 1,
+            apis: ["openai-completions"],
+            environment: { variables: [], detected: [], configured: true },
+          },
+        ],
+        models: [model],
+      };
+    }
+    return reply();
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: /添加模型提供商/ }));
+  fireEvent.change(await screen.findByLabelText("提供商"), { target: { value: "openai" } });
+  expect(await screen.findByText(/已检测到供应商环境认证/)).toBeTruthy();
+  expect(screen.queryByText(/未检测到环境凭证/)).toBeNull();
+});
+
+it("shows standard environment credentials as a simple key form and keeps explicit sources until replaced", async () => {
+  delete instance.custom;
+  instance.auth = { type: "apiKey", source: { type: "env", variable: "OPENAI_API_KEY" } };
+  vi.mocked(runnerClient.providerRequest).mockImplementation(async (request) => {
+    const response = await handle(request);
+    response.catalog = response.catalog?.map((entry) => ({
+      ...entry,
+      environment: { variables: ["OPENAI_API_KEY"], detected: ["OPENAI_API_KEY"] },
+    }));
+    return response;
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
+  expect(await screen.findByText(/已检测到环境变量/)).toBeTruthy();
+  expect(screen.queryByLabelText("环境变量名")).toBeNull();
+  expect(screen.getByLabelText("API 密钥")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await waitFor(() => expect(version).toBe("v2"));
+  expect(instance.auth).toEqual({
+    type: "apiKey",
+    source: { type: "env", variable: "OPENAI_API_KEY" },
+  });
+  fireEvent.change(await screen.findByLabelText("API 密钥"), {
+    target: { value: "replacement-key" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  await waitFor(() => expect(configured).toBe(true));
+  await waitFor(() =>
+    expect(instance.auth).toMatchObject({
+      source: { type: "keyring", entry: "company" },
+      useEnvironment: true,
+    }),
+  );
+});
 
 it("searches built-in suppliers and saves a new stable instance without sending a model request", async () => {
   configuredInstances = [];
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: "添加接入" }));
-  fireEvent.change(screen.getByLabelText("搜索内置供应商"), { target: { value: "deepseek" } });
-  expect(screen.queryByRole("button", { name: /OpenAI ·/ })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /DeepSeek ·/ }));
-  fireEvent.change(await screen.findByLabelText("接入名称"), {
+  fireEvent.click(await screen.findByRole("button", { name: /添加模型提供商/ }));
+  fireEvent.change(await screen.findByLabelText("提供商"), { target: { value: "deepseek" } });
+  fireEvent.click(await screen.findByRole("button", { name: "自定义设置" }));
+  fireEvent.change(await screen.findByLabelText("连接名称"), {
     target: { value: "我的 DeepSeek" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "保存接入" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
   await waitFor(() =>
     expect(runnerClient.providerRequest).toHaveBeenCalledWith(
       expect.objectContaining({

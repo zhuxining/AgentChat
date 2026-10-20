@@ -14,12 +14,12 @@ export function useProviders(instanceId?: string, type?: string, search?: string
   });
 }
 
-export function useProviderOperation() {
+export function useProviderOperation(invalidate = true) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (request: ProviderRequest) => runnerClient.providerRequest(request),
     onSuccess: async (_result: ProviderResponse, request: ProviderRequest) => {
-      if (!["test", "loginStatus", "loginRespond"].includes(request.action)) {
+      if (invalidate && !["test", "loginStatus", "loginRespond"].includes(request.action)) {
         await queryClient.invalidateQueries({ queryKey: providerQueryKey });
       }
     },

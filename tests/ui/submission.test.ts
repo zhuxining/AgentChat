@@ -1069,12 +1069,40 @@ it("keeps the loaded conversation visible when a snapshot refresh fails", async 
 });
 
 it("keeps settings drafts while switching categories but clears them on leaving", async () => {
+  vi.mocked(runnerClient.providerRequest).mockResolvedValue({
+    version: "v1",
+    restartRequired: false,
+    catalog: [
+      { type: "deepseek", name: "DeepSeek", authentication: ["apiKey"], modelCount: 0, apis: [] },
+    ],
+    instances: [
+      {
+        instance: {
+          id: "deepseek",
+          name: "DeepSeek",
+          type: "deepseek",
+          enabled: true,
+          auth: {
+            type: "apiKey",
+            source: { type: "keyring", entry: "deepseek" },
+            useEnvironment: true,
+          },
+          visibleModels: [],
+          modelOverrides: {},
+          customModels: [],
+        },
+        configured: false,
+        status: "missing",
+      },
+    ],
+  });
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   vi.mocked(runnerClient.snapshot).mockResolvedValue(initialSnapshot);
   renderApp();
   fireEvent.click(await screen.findByRole("button", { name: "应用设置" }));
   const settings = within(await screen.findByRole("region", { name: "设置" }));
-  const search = async () => (await settings.findByLabelText("搜索接入实例")) as HTMLInputElement;
+  const search = async () => (await settings.findByLabelText("API 密钥")) as HTMLInputElement;
+  fireEvent.click(await settings.findByRole("button", { name: "编辑 DeepSeek" }));
   fireEvent.change(await search(), { target: { value: "draft-across-categories" } });
 
   fireEvent.click(settings.getByRole("button", { name: "Runner" }));
@@ -1088,5 +1116,6 @@ it("keeps settings drafts while switching categories but clears them on leaving"
   fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
   const reopened = within(await screen.findByRole("region", { name: "设置" }));
   fireEvent.click(reopened.getByRole("button", { name: "模型与 Provider" }));
-  expect(((await reopened.findByLabelText("搜索接入实例")) as HTMLInputElement).value).toBe("");
+  fireEvent.click(await reopened.findByRole("button", { name: "编辑 DeepSeek" }));
+  expect(((await reopened.findByLabelText("API 密钥")) as HTMLInputElement).value).toBe("");
 });

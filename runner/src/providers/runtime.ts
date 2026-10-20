@@ -272,7 +272,9 @@ export function createInstanceRuntime(
       async env(name) {
         const value =
           item.parameters?.[name] ??
-          (item.auth.type === "ambient" ? ((await native.env(name)) ?? undefined) : undefined);
+          (item.auth.type === "ambient" || (item.auth.type === "apiKey" && item.auth.useEnvironment)
+            ? ((await native.env(name)) ?? undefined)
+            : undefined);
         if (value) resolvedEnv[name] = value;
         return value;
       },
@@ -283,7 +285,12 @@ export function createInstanceRuntime(
     ): Promise<AuthResult | undefined> {
       assertEnabled();
       if (!supplier?.auth.apiKey) return undefined;
-      if (item.auth.type !== "ambient" && !input.credential?.key) return undefined;
+      if (
+        item.auth.type !== "ambient" &&
+        !(item.auth.type === "apiKey" && item.auth.useEnvironment) &&
+        !input.credential?.key
+      )
+        return undefined;
       const credential = input.credential
         ? { ...input.credential, env: { ...item.parameters, ...input.credential.env } }
         : item.parameters

@@ -137,6 +137,60 @@ export class ProviderService {
             .map(({ kind, id, modelId }) => ({ kind, id, modelId }));
       }
       result.catalog = providerCatalog();
+      const selectedType =
+        request.type ??
+        (request.instanceId ? this.requireInstance(request.instanceId).type : undefined);
+      const supplier = builtins().find((item) => item.id === selectedType);
+      const entry = result.catalog.find((item) => item.type === selectedType);
+      if (entry && supplier?.auth.apiKey) {
+        const variables: string[] = [];
+        let detected: string[] = [];
+        let detectionError = false;
+        const isCloudProvider = ["amazon-bedrock", "google-vertex"].includes(entry.type);
+        try {
+          // Probe with empty values so the public resolver reports every environment name it reads.
+          await supplier.auth.apiKey.resolve({
+            ctx: {
+              env: async (name) => {
+                variables.push(name);
+                return undefined;
+              },
+              fileExists: async () => false,
+            },
+            signal: AbortSignal.timeout(2000),
+          });
+          const names = [...new Set(variables.filter((name) => /KEY|TOKEN/.test(name)))];
+          detected = (
+            await Promise.all(
+              names.map(async (name) => ((await this.native.env(name)) ? name : undefined)),
+            )
+          ).filter((name): name is string => !!name);
+        } catch {
+          detectionError = true;
+        }
+        let configured: boolean | undefined;
+        if (isCloudProvider) {
+          try {
+            configured = Boolean(
+              await supplier.auth.apiKey.resolve({
+                ctx: {
+                  env: async (name) => (await this.native.env(name)) ?? undefined,
+                  fileExists: (path) => this.native.fileExists(path),
+                },
+                signal: AbortSignal.timeout(2000),
+              }),
+            );
+          } catch {
+            detectionError = true;
+          }
+        }
+        entry.environment = {
+          variables: [...new Set(variables.filter((name) => /KEY|TOKEN/.test(name)))],
+          detected,
+          ...(configured === undefined ? {} : { configured }),
+          ...(detectionError ? { detectionError: true } : {}),
+        };
+      }
       const runtime = this.runtime();
       result.instances = await Promise.all(
         this.instances().map(async (instance) => {
