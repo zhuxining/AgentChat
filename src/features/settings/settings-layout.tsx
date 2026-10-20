@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export const settingsSections = [
   { id: "general", label: "通用", icon: PaletteIcon },
-  { id: "provider", label: "模型与 Provider", icon: KeyRoundIcon },
+  { id: "provider", label: "模型", icon: KeyRoundIcon },
   { id: "runner", label: "Runner", icon: CpuIcon },
   { id: "about", label: "关于", icon: InfoIcon },
 ] as const;

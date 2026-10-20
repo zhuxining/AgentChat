@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { useId, useState } from "react";
 
 import type { ProviderInstance } from "@/app/runner-client";
@@ -41,6 +42,7 @@ export function ProviderDetail({
   configured,
   statusMessage,
   test,
+  onCancel,
   onSaved,
   onRemove,
   onTest,
@@ -54,6 +56,7 @@ export function ProviderDetail({
   configured: boolean;
   statusMessage?: string;
   test?: ProviderTestResult;
+  onCancel: () => void;
   onSaved: (instanceId: string) => void;
   onRemove: () => void;
   onTest: (test: ProviderTestResult) => void;
@@ -151,20 +154,6 @@ export function ProviderDetail({
               }
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-id`}>稳定 ID</FieldLabel>
-            <Input
-              id={`${ids}-id`}
-              aria-label="接入稳定 ID"
-              disabled={saved}
-              value={instance.id}
-              onChange={(event) =>
-                setInstance((previous) => ({ ...previous, id: event.target.value }))
-              }
-            />
-            <FieldDescription>Bot 使用此 ID 引用接入；保存后不可更改。</FieldDescription>
-          </Field>
-          <p className="text-sm">供应商类型：{entry?.name ?? instance.type}</p>
           <Field orientation="horizontal" className="gap-2">
             <Checkbox
               id={`${ids}-enabled`}
@@ -242,46 +231,88 @@ export function ProviderDetail({
             ))}
           {instance.auth.type === "ambient" && (
             <p className="text-muted-foreground text-sm">
-              沿用供应商的云凭据链或本地服务认证行为。可在下方填写
-              AWS_REGION、GOOGLE_CLOUD_PROJECT、GOOGLE_CLOUD_LOCATION 等非秘密参数。
+              沿用供应商的云凭据链或本地服务认证行为。
             </p>
           )}
-          <Field>
-            <FieldLabel htmlFor={`${ids}-parameters`}>供应商参数 JSON</FieldLabel>
-            <Textarea
-              id={`${ids}-parameters`}
-              aria-label="供应商参数 JSON"
-              className="font-mono text-xs"
-              value={parameters}
-              onChange={(event) => setParameters(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-headers`}>连接 Header JSON</FieldLabel>
-            <Textarea
-              id={`${ids}-headers`}
-              aria-label="连接 Header JSON"
-              className="font-mono text-xs"
-              value={headers}
-              onChange={(event) => setHeaders(event.target.value)}
-            />
-            <FieldDescription>
-              参数不填写秘密值；认证 Header 请填写 ${"{credential:entry}"}{" "}
-              引用。读取失败会报告原因，不切换其他来源。
-            </FieldDescription>
-          </Field>
+          <Collapsible className="rounded-md border px-3">
+            <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex w-full items-center gap-2 py-3 text-left text-sm font-medium outline-none focus-visible:ring-2">
+              <ChevronRight
+                className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+                aria-hidden="true"
+              />
+              高级接入设置
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3 pb-3">
+              <Field>
+                <FieldLabel htmlFor={`${ids}-id`}>稳定 ID</FieldLabel>
+                <Input
+                  id={`${ids}-id`}
+                  aria-label="接入稳定 ID"
+                  disabled={saved}
+                  value={instance.id}
+                  onChange={(event) =>
+                    setInstance((previous) => ({ ...previous, id: event.target.value }))
+                  }
+                />
+                <FieldDescription>Bot 使用此 ID 引用接入；保存后不可更改。</FieldDescription>
+              </Field>
+              <p className="text-sm">供应商类型：{entry?.name ?? instance.type}</p>
+              {instance.auth.type === "ambient" && (
+                <p className="text-muted-foreground text-sm">
+                  可填写 AWS_REGION、GOOGLE_CLOUD_PROJECT、GOOGLE_CLOUD_LOCATION 等非秘密参数。
+                </p>
+              )}
+              <Field>
+                <FieldLabel htmlFor={`${ids}-parameters`}>供应商参数 JSON</FieldLabel>
+                <Textarea
+                  id={`${ids}-parameters`}
+                  aria-label="供应商参数 JSON"
+                  className="font-mono text-xs"
+                  value={parameters}
+                  onChange={(event) => setParameters(event.target.value)}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${ids}-headers`}>连接 Header JSON</FieldLabel>
+                <Textarea
+                  id={`${ids}-headers`}
+                  aria-label="连接 Header JSON"
+                  className="font-mono text-xs"
+                  value={headers}
+                  onChange={(event) => setHeaders(event.target.value)}
+                />
+                <FieldDescription>
+                  参数不填写秘密值；认证 Header 请填写 ${"{credential:entry}"} 引用。
+                </FieldDescription>
+              </Field>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       ) : (
-        <ProviderModels
-          allowBuiltinEditing
-          instance={instance}
-          saved={saved}
-          models={models}
-          apis={entry?.apis ?? []}
-          onChange={setInstance}
-        />
+        <div className="space-y-3">
+          {saved && (
+            <Button
+              variant="outline"
+              disabled={operation.isPending || dirty}
+              onClick={() => operation.mutate({ action: "refreshModels", instanceId: instance.id })}
+            >
+              获取可用模型
+            </Button>
+          )}
+          <ProviderModels
+            allowBuiltinEditing
+            instance={instance}
+            saved={saved}
+            models={models}
+            apis={entry?.apis ?? []}
+            onChange={setInstance}
+          />
+        </div>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+        <Button variant="outline" disabled={operation.isPending} onClick={onCancel}>
+          取消
+        </Button>
         <Button disabled={operation.isPending || !dirty} onClick={() => void save(false)}>
           保存接入
         </Button>
@@ -293,60 +324,72 @@ export function ProviderDetail({
           保存并测试
         </Button>
       </div>
-      <section aria-label="连接测试" className="space-y-2 rounded-lg border p-3">
-        <p className="text-sm">测试使用已保存的配置（包括待生效修改），可能产生供应商费用。</p>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-test-model`}>测试模型</FieldLabel>
-          <NativeSelect
-            id={`${ids}-test-model`}
-            aria-label="测试模型"
-            className="w-full"
-            value={modelId}
-            onChange={(event) => setModelId(event.target.value)}
+      <Collapsible className="rounded-md border px-3">
+        <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex w-full items-center gap-2 py-3 text-left text-sm font-medium outline-none focus-visible:ring-2">
+          <ChevronRight
+            className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+            aria-hidden="true"
+          />
+          连接测试
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-2 pb-3" aria-label="连接测试">
+          <p className="text-sm">使用已保存配置测试，可能产生供应商费用。</p>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-test-model`}>测试模型</FieldLabel>
+            <NativeSelect
+              id={`${ids}-test-model`}
+              aria-label="测试模型"
+              className="w-full"
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
+            >
+              <NativeSelectOption value="">选择测试模型</NativeSelectOption>
+              {[
+                ...new Set([
+                  ...models.map((model) => model.id),
+                  ...instance.customModels.flatMap((model) =>
+                    typeof model.id === "string" ? [model.id] : [],
+                  ),
+                ]),
+              ].map((id) => (
+                <NativeSelectOption key={id} value={id}>
+                  {id}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Button
+            variant="outline"
+            disabled={!saved || dirty || operation.isPending || !modelId}
+            onClick={() => void runTest()}
           >
-            <NativeSelectOption value="">选择测试模型</NativeSelectOption>
-            {[
-              ...new Set([
-                ...models.map((model) => model.id),
-                ...instance.customModels.flatMap((model) =>
-                  typeof model.id === "string" ? [model.id] : [],
-                ),
-              ]),
-            ].map((id) => (
-              <NativeSelectOption key={id} value={id}>
-                {id}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Button
-          variant="outline"
-          disabled={!saved || dirty || operation.isPending || !modelId}
-          onClick={() => void runTest()}
-        >
-          测试已保存配置
-        </Button>
-        {test && (
-          <div role="status" className="space-y-1 text-sm">
-            <p>
-              {test.success
-                ? "连接测试成功"
-                : `连接测试失败${test.category ? `（${test.category}）` : ""}`}
-              {test.version !== version || dirty ? " · 结果已过期" : ""}
-            </p>
-            <p>{test.message}</p>
-            <p className="text-muted-foreground text-xs">
-              模型 {test.modelId} · {test.testedAt} · 配置版本 {test.version}
-            </p>
-          </div>
-        )}
-      </section>
+            测试已保存配置
+          </Button>
+          {test && (
+            <div role="status" className="space-y-1 text-sm">
+              <p>
+                {test.success
+                  ? "连接测试成功"
+                  : `连接测试失败${test.category ? `（${test.category}）` : ""}`}
+                {test.version !== version || dirty ? " · 结果已过期" : ""}
+              </p>
+              <p>{test.message}</p>
+              <p className="text-muted-foreground text-xs">
+                模型 {test.modelId} · {test.testedAt} · 配置版本 {test.version}
+              </p>
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
       {references.length > 0 && (
         <Collapsible
-          defaultOpen
           render={<section className="space-y-2" aria-label={`引用位置（${references.length}）`} />}
         >
-          <CollapsibleTrigger className="focus-visible:ring-ring cursor-pointer rounded-md text-sm outline-none focus-visible:ring-2">
+          <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex items-center gap-2 rounded-md text-sm outline-none focus-visible:ring-2">
+            <ChevronRight
+              className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+              aria-hidden="true"
+            />
             引用位置（{references.length}）
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -362,13 +405,6 @@ export function ProviderDetail({
       )}
       {saved && (
         <div className="space-y-2">
-          <Button
-            variant="outline"
-            disabled={operation.isPending}
-            onClick={() => operation.mutate({ action: "refreshModels", instanceId: instance.id })}
-          >
-            刷新供应商模型目录
-          </Button>
           <Button
             variant="destructive"
             disabled={operation.isPending}

@@ -62,7 +62,7 @@ function newInstance(entry: ProviderCatalogEntry, custom = false): ProviderInsta
 export function ProviderSettings() {
   const { connection, actions, feedback } = useRunnerSettings();
   const queryClient = useQueryClient();
-  const [editing, setEditing] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState("builtin");
   const [newDraft, setNewDraft] = useState<ProviderInstance | null>(null);
@@ -118,107 +118,109 @@ export function ProviderSettings() {
           {notice}
         </p>
       )}
-      {!editing ? (
-        <section aria-label="已连接供应商" className="space-y-4">
-          <p className="text-muted-foreground text-sm">填入各提供商的认证凭证即可使用其模型。</p>
-          <ul aria-label="已连接供应商" className="space-y-3">
-            {data.instances?.map(({ instance: connection, status: connectionStatus }) => (
-              <li key={connection.id}>
-                <Item variant="outline" className="flex-nowrap rounded-xl p-4">
-                  <ItemContent>
-                    <ItemTitle className="flex-wrap">
-                      {connection.name}
-                      {connection.custom && (
-                        <span className="text-muted-foreground rounded border px-1.5 text-xs font-normal">
-                          自定义
-                        </span>
-                      )}
-                      <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs font-normal">
-                        <span
-                          aria-hidden="true"
-                          className={
-                            connectionStatus === "configured"
-                              ? "bg-primary size-2 rounded-full"
-                              : "bg-muted-foreground size-2 rounded-full"
-                          }
-                        />
-                        {
-                          {
-                            configured: connection.auth.type === "oauth" ? "已登录" : "已配置",
-                            missing: "待配置凭据",
-                            disabled: "已停用",
-                            error: "配置异常",
-                          }[connectionStatus]
-                        }
+      <section aria-label="已连接供应商" className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">模型</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            填入各提供商的 API 密钥即可使用其模型。
+          </p>
+        </div>
+        <ul aria-label="已连接供应商" className="space-y-3">
+          {data.instances?.map(({ instance: connection, status: connectionStatus }) => (
+            <li key={connection.id}>
+              <Item variant="outline" className="flex-nowrap rounded-xl p-4">
+                <ItemContent>
+                  <ItemTitle className="flex-wrap">
+                    {connection.name}
+                    {connection.custom && (
+                      <span className="text-muted-foreground rounded border px-1.5 text-xs font-normal">
+                        自定义
                       </span>
-                    </ItemTitle>
-                    <ItemDescription className="text-xs break-all">
-                      {addressSummary(connection.baseUrl)}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
+                    )}
+                    <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs font-normal">
+                      <span
+                        aria-hidden="true"
+                        className={
+                          connectionStatus === "configured"
+                            ? "bg-primary size-2 rounded-full"
+                            : "bg-muted-foreground size-2 rounded-full"
+                        }
+                      />
+                      {
+                        {
+                          configured: connection.auth.type === "oauth" ? "已登录" : "已配置",
+                          missing: "待配置凭据",
+                          disabled: "已停用",
+                          error: "配置异常",
+                        }[connectionStatus]
+                      }
+                    </span>
+                  </ItemTitle>
+                  <ItemDescription className="text-xs break-all">
+                    {addressSummary(connection.baseUrl)}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={`编辑 ${connection.name}`}
+                    aria-expanded={editorOpen && selectedId === connection.id}
+                    onClick={() => {
+                      setMode(connection.custom ? "custom" : "builtin");
+                      setSelectedId(connection.id);
+                      setNewDraft(null);
+                      setNotice("");
+                      setEditorOpen(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  {connection.custom && (
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      aria-label={`编辑 ${connection.name}`}
+                      className="text-destructive"
+                      aria-label={`删除 ${connection.name}`}
                       onClick={() => {
-                        setMode(connection.custom ? "custom" : "builtin");
-                        setSelectedId(connection.id);
-                        setNewDraft(null);
-                        setNotice("");
-                        setEditing(true);
+                        setRemoving(connection);
+                        setRemoveError("");
                       }}
                     >
-                      编辑
+                      删除
                     </Button>
-                    {connection.custom && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        aria-label={`删除 ${connection.name}`}
-                        onClick={() => {
-                          setRemoving(connection);
-                          setRemoveError("");
-                        }}
-                      >
-                        删除
-                      </Button>
-                    )}
-                  </ItemActions>
-                </Item>
-              </li>
-            ))}
-          </ul>
-          {!data.instances?.length && (
-            <p className="text-muted-foreground text-sm">尚未添加模型提供商。</p>
-          )}
-          <Button
-            variant="outline"
-            className="h-12 w-full border-dashed"
-            onClick={() => {
-              setSelectedId("");
-              setNewDraft(null);
-              setMode("builtin");
-              setNotice("");
-              setEditing(true);
-            }}
-          >
-            ＋ 添加模型提供商
-          </Button>
-        </section>
-      ) : (
-        <>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setEditing(false);
-              setSelectedId("");
-              setNewDraft(null);
-            }}
-          >
-            返回已连接列表
-          </Button>
+                  )}
+                </ItemActions>
+              </Item>
+            </li>
+          ))}
+        </ul>
+        {!data.instances?.length && (
+          <p className="text-muted-foreground text-sm">尚未添加模型提供商。</p>
+        )}
+        <Button
+          variant="outline"
+          className="h-12 w-full border-dashed"
+          onClick={() => {
+            setSelectedId("");
+            setNewDraft(null);
+            setMode("builtin");
+            setNotice("");
+            setEditorOpen(true);
+          }}
+        >
+          ＋ 添加模型提供商
+        </Button>
+      </section>
+      {editorOpen && (
+        <section aria-label="模型提供商配置" className="bg-muted/40 space-y-4 rounded-2xl p-5">
+          <h2 className="font-semibold">
+            {instance
+              ? status
+                ? `编辑 ${instance.name}`
+                : `配置 ${instance.name}`
+              : "添加模型提供商"}
+          </h2>
           <ToggleGroup
             aria-label="供应商配置类型"
             value={[mode]}
@@ -331,6 +333,11 @@ export function ProviderSettings() {
               configured={status?.configured ?? false}
               statusMessage={status?.message}
               test={tests[instance.id]}
+              onCancel={() => {
+                setEditorOpen(false);
+                setSelectedId("");
+                setNewDraft(null);
+              }}
               onSaved={(id) => {
                 setSelectedId(id);
                 setNewDraft(null);
@@ -340,14 +347,28 @@ export function ProviderSettings() {
                 setSelectedId("");
                 setNewDraft(null);
                 setNotice("接入已删除，重启后台后生效。");
-                setEditing(false);
+                setEditorOpen(false);
               }}
               onTest={(test) => setTests((previous) => ({ ...previous, [test.instanceId]: test }))}
             />
           ) : (
             <p className="text-muted-foreground text-sm">选择提供商后配置凭证。</p>
           )}
-        </>
+          {!instance && (
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditorOpen(false);
+                  setSelectedId("");
+                  setNewDraft(null);
+                }}
+              >
+                取消
+              </Button>
+            </div>
+          )}
+        </section>
       )}
       <Dialog
         open={!!removing}
@@ -384,6 +405,11 @@ export function ProviderSettings() {
                   });
                   setRemoving(null);
                   setNotice("连接已删除，重启后台后生效。");
+                  if (selectedId === removing.id) {
+                    setEditorOpen(false);
+                    setSelectedId("");
+                    setNewDraft(null);
+                  }
                 } catch (cause) {
                   setRemoveError(providerError(cause));
                 }

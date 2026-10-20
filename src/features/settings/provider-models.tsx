@@ -5,6 +5,7 @@ import { runnerClient, type ProviderInstance, type ProviderModel } from "@/app/r
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { ModelEditor } from "@/features/settings/model-editor";
@@ -68,31 +69,33 @@ export function ProviderModels({
           添加自定义模型
         </Button>
       </div>
-      <p className="text-muted-foreground text-xs">
-        勾选的模型会在 Bot 选择器中显示。隐藏不会禁止已有引用执行；建议至少选择一个模型。
-      </p>
+      <p className="text-muted-foreground text-xs">勾选后，模型会出现在 Bot 选择器中。</p>
       {!instance.visibleModels.length && (
         <p role="status" className="text-sm">
           尚未选择 Bot 可用模型。
         </p>
       )}
       {editing && (
-        <ModelEditor
-          key={editing === "new" ? "new" : editing.id}
-          instance={instance}
-          model={editing === "new" ? null : editing}
-          template={models[0]?.defaults ?? models[0]?.definition}
-          apiOptions={[
-            ...new Set([
-              ...apis,
-              ...models.flatMap((model) =>
-                typeof model.definition.api === "string" ? [model.definition.api] : [],
-              ),
-            ]),
-          ]}
-          onChange={onChange}
-          onClose={() => setEditing(null)}
-        />
+        <Dialog open onOpenChange={(open) => !open && setEditing(null)}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <ModelEditor
+              key={editing === "new" ? "new" : editing.id}
+              instance={instance}
+              model={editing === "new" ? null : editing}
+              template={models[0]?.defaults ?? models[0]?.definition}
+              apiOptions={[
+                ...new Set([
+                  ...apis,
+                  ...models.flatMap((model) =>
+                    typeof model.definition.api === "string" ? [model.definition.api] : [],
+                  ),
+                ]),
+              ]}
+              onChange={onChange}
+              onClose={() => setEditing(null)}
+            />
+          </DialogContent>
+        </Dialog>
       )}
       {searchQuery.isFetching && (
         <p role="status" className="text-sm">
@@ -143,7 +146,7 @@ export function ProviderModels({
                       aria-label={`编辑模型 ${model.id}`}
                       onClick={() => setEditing(model)}
                     >
-                      编辑
+                      配置模型
                     </Button>
                   )}
                 </div>

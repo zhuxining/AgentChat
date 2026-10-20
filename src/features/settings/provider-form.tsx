@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useId, useState, type ComponentProps } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,6 +28,7 @@ export function ProviderForm({
   configured,
   statusMessage,
   test,
+  onCancel,
   onSaved,
   onTest,
 }: ComponentProps<typeof ProviderDetail>) {
@@ -186,8 +187,11 @@ export function ProviderForm({
         </p>
       )}
       <Collapsible className="space-y-4 border-t pt-4">
-        <CollapsibleTrigger className="focus-visible:ring-ring flex items-center gap-2 rounded text-sm font-medium outline-none focus-visible:ring-2">
-          <ChevronDown className="size-4" aria-hidden="true" />
+        <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex items-center gap-2 rounded text-sm font-medium outline-none focus-visible:ring-2">
+          <ChevronRight
+            className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+            aria-hidden="true"
+          />
           自定义设置
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-4">
@@ -242,49 +246,54 @@ export function ProviderForm({
           </Field>
         </CollapsibleContent>
       </Collapsible>
-      <Collapsible className="space-y-3">
-        <CollapsibleTrigger className="focus-visible:ring-ring flex items-center gap-2 rounded text-sm outline-none focus-visible:ring-2">
-          <ChevronDown className="size-4" aria-hidden="true" />
-          其他认证方式
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-3">
-          <NativeSelect
-            aria-label="认证方式"
-            value={instance.auth.type}
-            onChange={(event) => {
-              const type = event.target.value;
-              setInstance((previous) => ({
-                ...previous,
-                auth:
-                  type === "ambient"
-                    ? { type: "ambient" }
-                    : type === "oauth"
-                      ? { type: "oauth", source: { type: "keyring", entry: previous.id } }
-                      : {
-                          type: "apiKey",
-                          source: { type: "keyring", entry: previous.id },
-                          useEnvironment: true,
-                        },
-              }));
-              setSecret("");
-            }}
-          >
-            {entry?.authentication.map((type) => (
-              <NativeSelectOption key={type} value={type}>
-                {type === "apiKey" ? "API 密钥" : type === "oauth" ? "OAuth 登录" : "云环境认证"}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <CredentialSettings
-            instance={instance}
-            saved={saved && !dirty}
-            onChange={(auth) => {
-              setSecret("");
-              setInstance((previous) => ({ ...previous, auth }));
-            }}
-          />
-        </CollapsibleContent>
-      </Collapsible>
+      {(entry?.authentication.length ?? 0) > 1 && (
+        <Collapsible className="space-y-3">
+          <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex items-center gap-2 rounded text-sm outline-none focus-visible:ring-2">
+            <ChevronRight
+              className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+              aria-hidden="true"
+            />
+            其他认证方式
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3">
+            <NativeSelect
+              aria-label="认证方式"
+              value={instance.auth.type}
+              onChange={(event) => {
+                const type = event.target.value;
+                setInstance((previous) => ({
+                  ...previous,
+                  auth:
+                    type === "ambient"
+                      ? { type: "ambient" }
+                      : type === "oauth"
+                        ? { type: "oauth", source: { type: "keyring", entry: previous.id } }
+                        : {
+                            type: "apiKey",
+                            source: { type: "keyring", entry: previous.id },
+                            useEnvironment: true,
+                          },
+                }));
+                setSecret("");
+              }}
+            >
+              {entry?.authentication.map((type) => (
+                <NativeSelectOption key={type} value={type}>
+                  {type === "apiKey" ? "API 密钥" : type === "oauth" ? "OAuth 登录" : "云环境认证"}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <CredentialSettings
+              instance={instance}
+              saved={saved && !dirty}
+              onChange={(auth) => {
+                setSecret("");
+                setInstance((previous) => ({ ...previous, auth }));
+              }}
+            />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
       <section className="space-y-4 border-t pt-5" aria-label="模型目录设置">
         <div className="flex items-center justify-between">
           <h3 className="font-medium">模型目录</h3>
@@ -304,6 +313,7 @@ export function ProviderForm({
           </Button>
         </div>
         <ProviderModels
+          allowBuiltinEditing
           instance={instance}
           saved={saved}
           models={models}
@@ -312,73 +322,85 @@ export function ProviderForm({
         />
       </section>
       {allowTest && (
-        <section aria-label="连接测试" className="space-y-2 rounded-lg border p-3">
-          <p className="text-sm">测试使用已保存的配置（包括待生效修改），可能产生供应商费用。</p>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-test-model`}>测试模型</FieldLabel>
-            <NativeSelect
-              id={`${ids}-test-model`}
-              aria-label="测试模型"
-              value={modelId}
-              onChange={(event) => setModelId(event.target.value)}
+        <Collapsible className="rounded-md border px-3">
+          <CollapsibleTrigger className="group/collapsible-trigger focus-visible:ring-ring flex w-full items-center gap-2 py-3 text-left text-sm font-medium outline-none focus-visible:ring-2">
+            <ChevronRight
+              className="size-4 transition-transform group-aria-expanded/collapsible-trigger:rotate-90"
+              aria-hidden="true"
+            />
+            连接测试
+          </CollapsibleTrigger>
+          <CollapsibleContent aria-label="连接测试" className="space-y-2 pb-3">
+            <p className="text-sm">测试使用已保存的配置（包括待生效修改），可能产生供应商费用。</p>
+            <Field>
+              <FieldLabel htmlFor={`${ids}-test-model`}>测试模型</FieldLabel>
+              <NativeSelect
+                id={`${ids}-test-model`}
+                aria-label="测试模型"
+                value={modelId}
+                onChange={(event) => setModelId(event.target.value)}
+              >
+                <NativeSelectOption value="">选择测试模型</NativeSelectOption>
+                {[
+                  ...new Set([
+                    ...models.map((model) => model.id),
+                    ...instance.customModels.flatMap((model) =>
+                      typeof model.id === "string" ? [model.id] : [],
+                    ),
+                  ]),
+                ].map((id) => (
+                  <NativeSelectOption key={id} value={id}>
+                    {id}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Button
+              variant="outline"
+              disabled={!modelId || operation.isPending}
+              onClick={async () => {
+                setError("");
+                try {
+                  const result = await operation.mutateAsync({
+                    action: "test",
+                    expectedVersion: currentVersion,
+                    instanceId: instance.id,
+                    modelId,
+                  });
+                  if (result.test) onTest(result.test);
+                } catch (cause) {
+                  setError(providerError(cause));
+                }
+              }}
             >
-              <NativeSelectOption value="">选择测试模型</NativeSelectOption>
-              {[
-                ...new Set([
-                  ...models.map((model) => model.id),
-                  ...instance.customModels.flatMap((model) =>
-                    typeof model.id === "string" ? [model.id] : [],
-                  ),
-                ]),
-              ].map((id) => (
-                <NativeSelectOption key={id} value={id}>
-                  {id}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </Field>
-          <Button
-            variant="outline"
-            disabled={!modelId || operation.isPending}
-            onClick={async () => {
-              setError("");
-              try {
-                const result = await operation.mutateAsync({
-                  action: "test",
-                  expectedVersion: currentVersion,
-                  instanceId: instance.id,
-                  modelId,
-                });
-                if (result.test) onTest(result.test);
-              } catch (cause) {
-                setError(providerError(cause));
-              }
-            }}
-          >
-            测试已保存配置
-          </Button>
-          {test && (
-            <div role="status" className="space-y-1 text-sm">
-              <p>
-                {test.success
-                  ? "连接测试成功"
-                  : `连接测试失败${test.category ? `（${test.category}）` : ""}`}
-                {test.version !== currentVersion || dirty ? " · 结果已过期" : ""}
-              </p>
-              <p>{test.message}</p>
-              <p className="text-muted-foreground text-xs">
-                模型 {test.modelId} · {test.testedAt} · 配置版本 {test.version}
-              </p>
-            </div>
-          )}
-        </section>
+              测试已保存配置
+            </Button>
+            {test && (
+              <div role="status" className="space-y-1 text-sm">
+                <p>
+                  {test.success
+                    ? "连接测试成功"
+                    : `连接测试失败${test.category ? `（${test.category}）` : ""}`}
+                  {test.version !== currentVersion || dirty ? " · 结果已过期" : ""}
+                </p>
+                <p>{test.message}</p>
+                <p className="text-muted-foreground text-xs">
+                  模型 {test.modelId} · {test.testedAt} · 配置版本 {test.version}
+                </p>
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
       )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <div className="flex gap-2">
+      <div className="flex justify-end gap-2 border-t pt-4">
+        <Button variant="outline" disabled={operation.isPending} onClick={onCancel}>
+          取消
+        </Button>
         <Button disabled={operation.isPending} onClick={() => void save()}>
           保存配置
         </Button>
