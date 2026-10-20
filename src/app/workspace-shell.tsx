@@ -43,7 +43,7 @@ export function WorkspaceShell() {
   const settingsMatch = matchRoute({ to: "/settings", fuzzy: true });
   const isChatRoute = Boolean(chatMatch) && !newBotMatch;
   const summaries = useBotSummaries(catalog?.bots ?? [], catalog?.conversations ?? []);
-  const { botListPanelRef, detailsPanelRef, detailsElement } = useWorkspacePanels({
+  const { botListPanelRef, detailsPanelRef } = useWorkspacePanels({
     settingsActive: Boolean(settingsMatch),
     botListOpen,
     detailsOpen,
@@ -145,8 +145,7 @@ export function WorkspaceShell() {
               minSize={260}
               maxSize={560}
               groupResizeBehavior="preserve-pixel-size"
-              elementRef={detailsElement}
-              className="overflow-hidden motion-reduce:transition-none"
+              className="overflow-hidden"
             >
               {isChatRoute && <BotDetailsPane />}
             </ResizablePanel>
