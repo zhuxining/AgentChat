@@ -147,6 +147,7 @@ export function ChatView({ botId }: { botId: string }) {
           title="详情"
           variant="ghost"
           size="icon-sm"
+          className="aria-expanded:bg-transparent hover:aria-expanded:bg-muted"
           aria-expanded={isDesktop ? detailsOpen : undefined}
           onClick={() =>
             isDesktop

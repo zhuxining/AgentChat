@@ -5,9 +5,8 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageContent } from "@/components/ui/message";
 import { useMarkdownPlugins } from "@/features/chat/use-markdown-plugins";
 
-// Owns how a single transcript message is rendered: user messages keep the bubble
-// treatment, assistant messages render Markdown with code highlighting, CJK and
-// lazily-loaded Mermaid diagrams.
+// Owns how a single transcript message is rendered: both user and assistant messages use
+// bubbles; assistant content keeps Markdown, code highlighting, CJK and lazy Mermaid diagrams.
 export function MessageBody({
   message,
   streaming,
@@ -26,14 +25,18 @@ export function MessageBody({
             <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
           </Bubble>
         ) : (
-          <Streamdown
-            mode={streaming ? "streaming" : "static"}
-            isAnimating={streaming}
-            animated={false}
-            plugins={markdownPlugins}
-          >
-            {message.text}
-          </Streamdown>
+          <Bubble align="start" variant="muted">
+            <BubbleContent>
+              <Streamdown
+                mode={streaming ? "streaming" : "static"}
+                isAnimating={streaming}
+                animated={false}
+                plugins={markdownPlugins}
+              >
+                {message.text}
+              </Streamdown>
+            </BubbleContent>
+          </Bubble>
         )}
         {message.truncated && <span className="text-muted-foreground">（内容已截断）</span>}
       </MessageContent>

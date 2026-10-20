@@ -114,7 +114,7 @@ export function WorkspaceShell() {
               collapsedSize={botListCollapsedSize}
               defaultSize={260}
               minSize={200}
-              maxSize={420}
+              maxSize={400}
               groupResizeBehavior="preserve-pixel-size"
               onResize={(size) => setBotListOpen(size.inPixels > botListCollapsedSize)}
               className="overflow-hidden"
@@ -141,9 +141,9 @@ export function WorkspaceShell() {
               panelRef={detailsPanelRef}
               collapsible
               collapsedSize={0}
-              defaultSize={340}
-              minSize={260}
-              maxSize={560}
+              defaultSize={320}
+              minSize={300}
+              maxSize={400}
               groupResizeBehavior="preserve-pixel-size"
               className="overflow-hidden"
             >
