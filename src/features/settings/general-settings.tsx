@@ -1,7 +1,7 @@
 import { useId } from "react";
 
 import { isTheme, useTheme } from "@/app/theme";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { SettingsSectionCard } from "@/features/settings/settings-layout";
 
@@ -11,11 +11,14 @@ export function GeneralSettings() {
 
   return (
     <SettingsSectionCard title="界面偏好">
-      <Field>
-        <FieldLabel htmlFor={id}>主题</FieldLabel>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="min-w-0">
+          <FieldLabel htmlFor={id}>外观</FieldLabel>
+        </div>
         <NativeSelect
           id={id}
           value={theme}
+          className="w-full sm:w-40"
           onChange={(event) => {
             if (isTheme(event.target.value)) setTheme(event.target.value);
           }}
@@ -24,8 +27,7 @@ export function GeneralSettings() {
           <NativeSelectOption value="light">浅色</NativeSelectOption>
           <NativeSelectOption value="dark">深色</NativeSelectOption>
         </NativeSelect>
-        <FieldDescription>立即生效并自动保存。跟随系统时，自动同步系统明暗主题。</FieldDescription>
-      </Field>
+      </div>
       {storageError && (
         <p role="alert" className="text-danger text-sm">
           {storageError}

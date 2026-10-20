@@ -115,7 +115,7 @@ export function SettingsLayout() {
           </Button>
           <h1
             key={active?.id ?? "index"}
-            className="animate-fade-in min-w-0 flex-1 truncate text-sm font-semibold"
+            className="animate-fade-in min-w-0 flex-1 truncate text-base font-semibold"
             data-window-drag-region
           >
             {active ? active.label : "设置"}
@@ -135,10 +135,18 @@ export function SettingsLayout() {
   );
 }
 
+export function SettingsInfoList({ children }: { children: ReactNode }) {
+  return (
+    <div className="divide-border divide-y [&>*]:py-2 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
+      {children}
+    </div>
+  );
+}
+
 export function SettingsSectionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section aria-label={title} className="space-y-2">
-      <h2 className="text-sm font-medium">{title}</h2>
+      <h2 className="text-sm font-semibold">{title}</h2>
       <div className="bg-card space-y-3 rounded-xl border p-4">{children}</div>
     </section>
   );

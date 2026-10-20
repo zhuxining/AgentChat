@@ -296,7 +296,7 @@ export function ProviderForm({
       )}
       <section className="space-y-4 border-t pt-5" aria-label="模型目录设置">
         <div className="flex items-center justify-between">
-          <h3 className="font-medium">模型目录</h3>
+          <h3 className="text-sm font-semibold">模型目录</h3>
           <Button
             variant="ghost"
             disabled={!saved || dirty || operation.isPending}

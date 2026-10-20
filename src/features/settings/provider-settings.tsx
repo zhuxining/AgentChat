@@ -118,17 +118,12 @@ export function ProviderSettings() {
           {notice}
         </p>
       )}
-      <section aria-label="已连接供应商" className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">模型</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            填入各提供商的 API 密钥即可使用其模型。
-          </p>
-        </div>
+      <section aria-label="已连接供应商" className="space-y-3">
+        <h2 className="text-sm font-semibold">模型</h2>
         <ul aria-label="已连接供应商" className="space-y-3">
           {data.instances?.map(({ instance: connection, status: connectionStatus }) => (
             <li key={connection.id}>
-              <Item variant="outline" className="flex-nowrap rounded-xl p-4">
+              <Item variant="outline" className="flex-nowrap rounded-xl p-3">
                 <ItemContent>
                   <ItemTitle className="flex-wrap">
                     {connection.name}
@@ -200,7 +195,7 @@ export function ProviderSettings() {
         )}
         <Button
           variant="outline"
-          className="h-12 w-full border-dashed"
+          className="h-10 w-full border-dashed"
           onClick={() => {
             setSelectedId("");
             setNewDraft(null);
@@ -213,8 +208,8 @@ export function ProviderSettings() {
         </Button>
       </section>
       {editorOpen && (
-        <section aria-label="模型提供商配置" className="bg-muted/40 space-y-4 rounded-2xl p-5">
-          <h2 className="font-semibold">
+        <section aria-label="模型提供商配置" className="space-y-3 rounded-xl border p-4">
+          <h2 className="text-sm font-semibold">
             {instance
               ? status
                 ? `编辑 ${instance.name}`
@@ -237,11 +232,6 @@ export function ProviderSettings() {
             <ToggleGroupItem value="builtin">第三方模型提供商</ToggleGroupItem>
             <ToggleGroupItem value="custom">自定义模型 API</ToggleGroupItem>
           </ToggleGroup>
-          <p className="text-muted-foreground text-sm">
-            {mode === "builtin"
-              ? "从内置目录中选择提供商，填入其认证凭证即可使用。"
-              : "选择兼容的提供商协议，配置自定义 API 地址与模型。"}
-          </p>
           <div className="space-y-2">
             <label htmlFor="provider-type" className="text-sm font-medium">
               提供商
@@ -352,7 +342,7 @@ export function ProviderSettings() {
               onTest={(test) => setTests((previous) => ({ ...previous, [test.instanceId]: test }))}
             />
           ) : (
-            <p className="text-muted-foreground text-sm">选择提供商后配置凭证。</p>
+            <p role="status" className="text-muted-foreground text-sm">尚未选择提供商。</p>
           )}
           {!instance && (
             <div className="flex justify-end">

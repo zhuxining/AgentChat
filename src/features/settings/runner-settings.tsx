@@ -2,7 +2,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InfoRow } from "@/components/ui/inspector-section";
 import { ConfigurationEditor } from "@/features/settings/configuration-editor";
-import { SettingsSectionCard } from "@/features/settings/settings-layout";
+import { SettingsInfoList, SettingsSectionCard } from "@/features/settings/settings-layout";
 import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
 export function RunnerSettings() {
@@ -11,16 +11,18 @@ export function RunnerSettings() {
   return (
     <div className="space-y-6">
       <SettingsSectionCard title="后台运行状态">
-        <InfoRow
-          label="本机状态"
-          value={
-            connection.runnerStopped
-              ? "后台已停止"
-              : connection.runnerUnavailable
-                ? "连接失败"
-                : "已连接"
-          }
-        />
+        <SettingsInfoList>
+          <InfoRow
+            label="本机状态"
+            value={
+              connection.runnerStopped
+                ? "后台已停止"
+                : connection.runnerUnavailable
+                  ? "连接失败"
+                  : "已连接"
+            }
+          />
+        </SettingsInfoList>
         <p className="text-muted-foreground text-xs leading-5">
           关闭窗口或退出 UI 后，后台 Runner 继续运行。停止 Runner
           会保留未完成工作的恢复状态；取消工作需单独操作。
@@ -56,22 +58,24 @@ export function RunnerSettings() {
       </SettingsSectionCard>
       {configuration && (
         <SettingsSectionCard title="配置生效状态">
-          <InfoRow
-            label="数据目录"
-            value={<span className="break-all">{configuration.dataDir}</span>}
-          />
-          <InfoRow
-            label="执行状态"
-            value={
-              connection.runnerStopped
-                ? "Runner 已停止"
-                : connection.runnerUnavailable
-                  ? "连接失败，状态未知"
-                  : configuration.ready
-                    ? "可执行"
-                    : "配置待修复，暂不能执行"
-            }
-          />
+          <SettingsInfoList>
+            <InfoRow
+              label="数据目录"
+              value={<span className="break-all">{configuration.dataDir}</span>}
+            />
+            <InfoRow
+              label="执行状态"
+              value={
+                connection.runnerStopped
+                  ? "Runner 已停止"
+                  : connection.runnerUnavailable
+                    ? "连接失败，状态未知"
+                    : configuration.ready
+                      ? "可执行"
+                      : "配置待修复，暂不能执行"
+              }
+            />
+          </SettingsInfoList>
           <p className="text-muted-foreground text-xs leading-5">
             配置来源为 runner.json 和各 Bot 的 bot.json。Bot 默认值在创建时写入；未配置的 Harness
             策略沿用当前库默认值。独立编辑文件后需重载；已有执行使用已保存的配置。
@@ -104,7 +108,6 @@ export function RunnerSettings() {
           />
         </SettingsSectionCard>
       )}
-      <p className="text-muted-foreground text-xs">Node {connection.runtimeVersion || "—"}</p>
     </div>
   );
 }
