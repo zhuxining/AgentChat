@@ -36,10 +36,17 @@ export type ConversationSummary = {
   botConfigVersion: string;
   createdAt: number;
 };
+export type BotListSummary = {
+  botId: string;
+  conversationId: number | null;
+  latestMessage: string;
+  executing: boolean;
+};
 export type RunnerCapabilities = {
   extensions: string[];
   tools: { name: string; extension: string }[];
 };
+export type QueryCapabilities = { botSummaries: boolean };
 export type ProjectedMessage = {
   id: number;
   role: "user" | "assistant" | "tool" | "system";
@@ -97,6 +104,7 @@ export type InitializeResult = {
   configuration: ConfigurationStatus;
   conversations: ConversationSummary[];
   capabilities: RunnerCapabilities;
+  queryCapabilities?: QueryCapabilities;
   // Absent while an older background Runner is still serving; the UI falls back to the
   // Bot's current provider and model in that case.
   providers?: ProviderOption[];
@@ -121,6 +129,7 @@ export type RunnerRequest =
   | { op: "submit"; conversationId: number; text: string; requestId: string }
   | { op: "abortSubmission"; conversationId: number; submissionId: number }
   | { op: "snapshot"; conversationId: number }
+  | { op: "botSummaries" }
   | { op: "abort"; conversationId: number };
 type RunnerReply<T> = { result: T | null };
 
@@ -164,6 +173,7 @@ export const runnerClient = {
     }),
   snapshot: (conversationId: number) =>
     request<ConversationSnapshot>({ op: "snapshot", conversationId }),
+  botSummaries: () => request<BotListSummary[]>({ op: "botSummaries" }),
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
   startRunner: () => invoke<void>("start_runner"),
   stopRunner: () => invoke<void>("stop_runner"),

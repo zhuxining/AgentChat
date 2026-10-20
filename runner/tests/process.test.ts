@@ -45,12 +45,19 @@ describe("Runner process protocol", () => {
       expect(await nextResponse()).toMatchObject({
         id: 2,
         ok: true,
-        result: { bots: [], conversations: [], apiKeyConfigured: true },
+        result: {
+          bots: [],
+          conversations: [],
+          apiKeyConfigured: true,
+          queryCapabilities: { botSummaries: true },
+        },
       });
+      send(3, "botSummaries");
+      expect(await nextResponse()).toEqual({ id: 3, ok: true, result: [] });
 
       const exited = once(child, "exit");
-      send(3, "close");
-      expect(await nextResponse()).toMatchObject({ id: 3, ok: true, result: { closed: true } });
+      send(4, "close");
+      expect(await nextResponse()).toMatchObject({ id: 4, ok: true, result: { closed: true } });
       expect(await exited).toEqual([0, null]);
     } finally {
       lines.close();

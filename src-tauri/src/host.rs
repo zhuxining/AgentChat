@@ -855,6 +855,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
 
     #[test]
     fn public_boundary_rejects_raw_credentials_and_close() {
+        assert!(validate_public_request(&RunnerRequest::BotSummaries).is_ok());
         assert!(validate_public_request(&RunnerRequest::Close).is_err());
         assert!(
             validate_public_request(&RunnerRequest::SetProviderCredential {

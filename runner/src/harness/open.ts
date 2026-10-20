@@ -13,6 +13,7 @@ import { createInstanceRuntime, instancesOf, builtins } from "../providers/runti
 import { ProviderService } from "../providers/service.js";
 import { ProviderState } from "../providers/state.js";
 import { createAgentResolver } from "./agent.js";
+import { createAuthStatus } from "./auth-status.js";
 import { executionEnvironment } from "./environment.js";
 import { workGoalExtension } from "./extensions/work-goal.js";
 import { prepareProvider } from "./models.js";
@@ -41,15 +42,18 @@ export async function openRunner({
   // Schema 2 instances must resolve their explicitly selected source.
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const providerState = await ProviderState.open(dataDir);
+  let authRevision = 0;
   const rawNative = suppliedNative ?? localNativeAdapter(ambientEnvironment);
   const native: NativeAdapter = {
     ...rawNative,
     async writeCredential(source, credential) {
       await rawNative.writeCredential(source, credential);
+      authRevision++;
       await providerState.touch();
     },
     async deleteCredential(source) {
       await rawNative.deleteCredential(source);
+      authRevision++;
       await providerState.touch();
     },
   };
@@ -114,6 +118,17 @@ export async function openRunner({
   let openedProviders: string | undefined;
   let active: Awaited<ReturnType<typeof start>> | undefined;
   let closing = false;
+  const authStatus = createAuthStatus(
+    async (id) => (providedModels ? provider.isConfigured() : Boolean(await models.checkAuth(id))),
+    () => `${authRevision}:${providerState.credentialRevision}`,
+  );
+  const isConfigured = async (id: string | undefined) => {
+    try {
+      return await authStatus(id);
+    } catch {
+      return false;
+    }
+  };
   let configQueue = Promise.resolve();
   function configure<T>(operation: () => Promise<T>): Promise<T> {
     const result = configQueue.then(() => {
@@ -149,16 +164,9 @@ export async function openRunner({
     );
     openedProviders = JSON.stringify(configuration.runner?.providers);
     const operations = createOperations(harness, configuration, models, resolver);
-    const snapshot = createViews(harness, resolver, async (id) => {
-      if (providedModels) return provider.isConfigured();
-      try {
-        return Boolean(id && (await models.checkAuth(id)));
-      } catch {
-        return false;
-      }
-    });
+    const views = createViews(harness, storage, resolver, isConfigured);
     harness.resume();
-    return { harness, storage, operations, snapshot };
+    return { harness, storage, operations, ...views };
   }
   async function ensureStarted() {
     if (!active && configuration.runner) active = await start();
@@ -263,6 +271,7 @@ export async function openRunner({
     return {
       bots: configuration.bots(),
       conversations: active ? await active.operations.conversations() : [],
+      queryCapabilities: { botSummaries: true },
       capabilities: {
         extensions: installed
           .installed()
@@ -305,11 +314,7 @@ export async function openRunner({
             })
             .map((model) => model.id),
         })),
-      apiKeyConfigured: providedModels
-        ? provider.isConfigured()
-        : await models
-            .checkAuth(configuration.runner?.botDefaults.model.provider ?? "")
-            .then(Boolean, () => false),
+      apiKeyConfigured: await isConfigured(configuration.runner?.botDefaults.model.provider),
       runtimeVersion: process.version,
     };
   }
@@ -324,7 +329,11 @@ export async function openRunner({
           : undefined;
       if (action !== "save" && action !== "remove" && action !== "writeCredential")
         return providers.request(request);
-      return configure(() => providers.request(request));
+      return configure(async () => {
+        const result = await providers.request(request);
+        authRevision++;
+        return result;
+      });
     },
     createBot: (draft: Partial<Bot> & { name: string }) =>
       configure(async () => {
@@ -349,6 +358,7 @@ export async function openRunner({
     reloadConfiguration: () =>
       configure(async () => {
         await configuration.reload();
+        authRevision++;
         await ensureStarted();
         return initialize();
       }),
@@ -356,6 +366,7 @@ export async function openRunner({
     saveConfiguration: (path: string, version: string, content: string) =>
       configure(async () => {
         await configuration.saveConfiguration(path, version, content);
+        authRevision++;
         await ensureStarted();
         return { saved: true };
       }),
@@ -371,7 +382,15 @@ export async function openRunner({
       execution().operations.abortSubmission(id, submissionId),
     abort: (id: number) => execution().operations.abort(id),
     snapshot: (id: number) => execution().snapshot(id),
-    setProviderCredential: (value: unknown) => provider.setCredential(value),
+    botSummaries: async () => {
+      const current = execution();
+      return current.botSummaries(configuration.bots(), await current.operations.conversations());
+    },
+    setProviderCredential: (value: unknown) => {
+      const result = provider.setCredential(value);
+      authRevision++;
+      return result;
+    },
     close: async () => {
       closing = true;
       await configQueue;

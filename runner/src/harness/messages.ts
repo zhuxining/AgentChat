@@ -1,4 +1,11 @@
-import type { Conversation } from "@earendil-works/pi-durable";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type {
+  Conversation,
+  ConversationId,
+  Cursor,
+  EntryRecord,
+  Storage,
+} from "@earendil-works/pi-durable";
 
 type Entries = Awaited<ReturnType<Conversation["viewState"]>>["value"]["entries"];
 const maxProjectedMessages = 50;
@@ -9,6 +16,35 @@ type MessageProjection = {
   text: string;
   truncated: boolean;
 };
+
+export async function readProjectedMessages(storage: Storage, conversationId: ConversationId) {
+  const context = BACKGROUND_CONTEXT;
+  const tail = (await storage.scanEntries({ conversationId }, 1, undefined, context)).items[0];
+  if (!tail) return projectMessages([]);
+  // Freeze the visible tail before locating its head. Entries within these bounds are immutable.
+  const head = await storage.findLatestHeadMarker(conversationId, tail.id, context);
+  const query = {
+    conversationId,
+    maxEntryId: tail.id,
+    ...(head ? { minEntryId: head.head } : {}),
+  };
+  const entries: EntryRecord[] = [];
+  let cursor: Cursor | undefined;
+  do {
+    const page = await storage.scanEntries(query, maxProjectedMessages + 1, cursor, context);
+    for (const entry of page.items) {
+      if (head && entry.head !== undefined) continue;
+      entries.push(entry);
+      if (entries.length > maxProjectedMessages) break;
+    }
+    cursor = page.next;
+  } while (cursor !== undefined && entries.length <= maxProjectedMessages);
+  entries.reverse();
+  // The active view prepends the latest head and excludes earlier head markers.
+  // Once 51 non-head entries are present, that prepended marker is outside the projection.
+  if (head && entries.length <= maxProjectedMessages) entries.unshift(head);
+  return projectMessages(entries);
+}
 
 export function projectMessages(entries: Entries) {
   const messages: MessageProjection[] = entries.slice(-maxProjectedMessages).map((entry) => {

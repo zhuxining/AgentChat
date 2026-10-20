@@ -39,7 +39,9 @@ export function useChatActions(
     assertCurrent();
     await cache.cancelQueries({ queryKey: runnerKeys.snapshot(id) });
     assertCurrent();
-    return cache.fetchQuery({ ...snapshotOptions(client, id), staleTime: 0 });
+    const snapshot = await cache.fetchQuery({ ...snapshotOptions(client, id), staleTime: 0 });
+    await cache.invalidateQueries({ queryKey: runnerKeys.botSummaries });
+    return snapshot;
   }
   function changeConversation(action: (id: number, assertCurrent: () => void) => Promise<unknown>) {
     if (conversationId === null) return Promise.resolve(false);

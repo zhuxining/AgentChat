@@ -1,15 +1,24 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AgentDoc, type Harness } from "@earendil-works/pi-durable";
+import { AgentDoc, type Harness, type Storage } from "@earendil-works/pi-durable";
 
+import type { Bot } from "../config/configuration.js";
 import type { createAgentResolver } from "./agent.js";
 import { GoalState } from "./extensions/work-goal.js";
-import { projectMessages } from "./messages.js";
+import { readProjectedMessages } from "./messages.js";
 import { conversationById } from "./operations/index.js";
-import { ConversationMetadata } from "./product-state.js";
+import { ConversationMetadata, type ConversationSummary } from "./product-state.js";
+
+export type BotListSummary = {
+  botId: string;
+  conversationId: number | null;
+  latestMessage: string;
+  executing: boolean;
+};
 
 const context = BACKGROUND_CONTEXT;
 export function createViews(
   harness: Harness,
+  storage: Storage,
   resolver: ReturnType<typeof createAgentResolver>,
   isConfigured: (providerId: string | undefined) => Promise<boolean> | boolean,
 ) {
@@ -17,16 +26,15 @@ export function createViews(
     const agent = await harness.snapshot(AgentDoc, conversation.id, context);
     return resolver.missing(agent?.extensions, agent?.tools);
   }
-  return async function snapshot(id: number) {
+  async function snapshot(id: number) {
     const conversation = await conversationById(harness, id);
-    const state = await conversation.viewState(context);
     const graph = await harness.taskGraph(context);
     try {
       const metadata = await harness.snapshot(ConversationMetadata, conversation.id, context);
       const goal = await harness.snapshot(GoalState, conversation.id, context);
       const agent = await conversation.agent(context);
       const missing = await configurationErrors(conversation);
-      const { messages, hasMoreMessages } = projectMessages(state.value.entries);
+      const { messages, hasMoreMessages } = await readProjectedMessages(storage, conversation.id);
       const inspection = await harness.inspect(context);
       const activeTasks = Object.values(graph.value.tasks)
         .filter((task) => task.conversationId === conversation.id)
@@ -70,8 +78,49 @@ export function createViews(
         apiKeyConfigured: await isConfigured(agent.model?.provider),
       };
     } finally {
-      state.dispose();
       graph.dispose();
     }
-  };
+  }
+  async function botSummaries(
+    bots: Bot[],
+    conversations: ConversationSummary[],
+  ): Promise<BotListSummary[]> {
+    const latest = new Map<string, ConversationSummary>();
+    for (const conversation of conversations) {
+      const current = latest.get(conversation.botId);
+      if (
+        !current ||
+        conversation.createdAt > current.createdAt ||
+        (conversation.createdAt === current.createdAt && conversation.id > current.id)
+      ) {
+        latest.set(conversation.botId, conversation);
+      }
+    }
+    const graph = await harness.taskGraph(context);
+    try {
+      const executing = new Set<number>();
+      for (const task of Object.values(graph.value.tasks)) {
+        if (task.state.status === "running") executing.add(task.conversationId);
+      }
+      return await Promise.all(
+        bots.map(async (bot) => {
+          const summary = latest.get(bot.id);
+          if (!summary)
+            return { botId: bot.id, conversationId: null, latestMessage: "", executing: false };
+          const conversation = await conversationById(harness, summary.id);
+          const { messages } = await readProjectedMessages(storage, conversation.id);
+          const text = messages.findLast((message) => message.text)?.text ?? "";
+          return {
+            botId: bot.id,
+            conversationId: conversation.id,
+            latestMessage: Array.from(text).slice(0, 160).join(""),
+            executing: executing.has(conversation.id),
+          };
+        }),
+      );
+    } finally {
+      graph.dispose();
+    }
+  }
+  return { snapshot, botSummaries };
 }

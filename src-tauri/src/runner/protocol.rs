@@ -8,6 +8,7 @@ use serde_json::Value;
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum RunnerRequest {
     Initialize,
+    BotSummaries,
     ReloadConfiguration,
     ReadConfiguration {
         path: String,
@@ -264,6 +265,7 @@ impl RunnerRequest {
                 }
             }
             Self::Initialize
+            | Self::BotSummaries
             | Self::ReloadConfiguration
             | Self::ApplyBotSettings { .. }
             | Self::AbortSubmission { .. }
@@ -333,6 +335,45 @@ mod tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["op"], "createBot");
         assert_eq!(value["modelId"], "test-model");
+    }
+
+    #[test]
+    fn bot_summaries_round_trips_as_a_parameterless_public_request() {
+        let request: RunnerRequest =
+            serde_json::from_value(serde_json::json!({"op": "botSummaries"})).unwrap();
+        assert!(request.validate().is_ok());
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({"op": "botSummaries"})
+        );
+        assert_eq!(
+            serde_json::to_value(WireRequest { id: 7, request }).unwrap(),
+            serde_json::json!({"id": 7, "op": "botSummaries"})
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_bot_summaries_requests() {
+        for value in [
+            serde_json::json!({"op": "BotSummaries"}),
+            serde_json::json!({"op": "bot_summaries"}),
+            serde_json::json!({"op": "botSummariesUnknown"}),
+            serde_json::json!({}),
+            serde_json::json!({"op": null}),
+            serde_json::json!({"op": 7}),
+            serde_json::json!({"op": {"botSummaries": {}}}),
+            serde_json::json!("botSummaries"),
+            serde_json::json!([{"op": "botSummaries"}]),
+            Value::Null,
+        ] {
+            assert!(
+                serde_json::from_value::<RunnerRequest>(value.clone()).is_err(),
+                "accepted malformed request: {value}"
+            );
+        }
+        assert!(
+            serde_json::from_str::<RunnerRequest>(r#"{"op":"botSummaries","op":"close"}"#).is_err()
+        );
     }
 
     #[test]

@@ -572,7 +572,7 @@ it("archives using the Bot version captured by the detail view", async () => {
   expect(await screen.findByText("Bot 配置已变更，请重新读取")).toBeTruthy();
 });
 
-it("renders every conversation of a Bot as one continuous timeline", async () => {
+it("renders the selected conversation before explicitly loading chronological history", async () => {
   const history: ConversationSnapshot = {
     ...initialSnapshot,
     conversation: { ...initialSnapshot.conversation, id: 40 },
@@ -593,9 +593,15 @@ it("renders every conversation of a Bot as one continuous timeline", async () =>
   renderApp();
   await openBot();
   const chat = within(await screen.findByRole("region", { name: "聊天内容" }));
+  expect(await chat.findByText("这一段会话的回复")).toBeTruthy();
+  expect(chat.queryByText("上一段会话的消息")).toBeNull();
+  expect(runnerClient.snapshot).toHaveBeenCalledTimes(1);
+  fireEvent.click(chat.getByRole("button", { name: "加载更早对话" }));
   expect(await chat.findByText("上一段会话的消息")).toBeTruthy();
-  expect(chat.getByText("这一段会话的回复")).toBeTruthy();
-  expect(chat.getByText(/新会话/)).toBeTruthy();
+  const messageOrder = chat
+    .getAllByText(/会话的(?:消息|回复)/)
+    .map((message) => message.textContent);
+  expect(messageOrder).toEqual(["上一段会话的消息", "这一段会话的回复"]);
 });
 
 it("renders Bot details when an older background Runner omits provider options", async () => {

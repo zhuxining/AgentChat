@@ -1,6 +1,11 @@
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
-import type { InitializeResult, runnerClient } from "@/app/runner-client";
+import type {
+  BotListSummary,
+  ConversationSnapshot,
+  InitializeResult,
+  runnerClient,
+} from "@/app/runner-client";
 import { useWorkspaceResources } from "@/app/workspace-provider";
 
 export const runnerKeys = {
@@ -9,6 +14,9 @@ export const runnerKeys = {
   lifecycle: ["runner", "lifecycle"] as const,
   snapshots: ["runner", "snapshot"] as const,
   snapshot: (id: number | null) => ["runner", "snapshot", id] as const,
+  botSummaries: ["runner", "bot-summaries"] as const,
+  botSummariesFor: (botIds: string[], conversationIds: (number | null)[]) =>
+    ["runner", "bot-summaries", botIds, conversationIds] as const,
 };
 export type RunnerLifecycle = {
   paused: boolean;
@@ -73,6 +81,54 @@ export function snapshotOptions(client: typeof runnerClient, id: number | null) 
       return snapshot;
     },
     staleTime: 10_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function botSummariesOptions(
+  client: typeof runnerClient,
+  cache: QueryClient,
+  targets: { botId: string; conversationId: number | null }[],
+  supportsBatch: boolean,
+) {
+  return queryOptions({
+    queryKey: runnerKeys.botSummariesFor(
+      targets.map((target) => target.botId),
+      targets.map((target) => target.conversationId),
+    ),
+    queryFn: async ({ signal }) => {
+      if (supportsBatch) {
+        try {
+          const summaries = await client.botSummaries();
+          signal.throwIfAborted();
+          return summaries;
+        } catch (cause) {
+          const message =
+            cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
+          if (!message.includes("不支持的 Runner 操作")) throw cause;
+        }
+      }
+      const summaries: BotListSummary[] = await Promise.all(
+        targets.map(async ({ botId, conversationId }) => {
+          if (conversationId === null)
+            return { botId, conversationId: null, latestMessage: "", executing: false };
+          const snapshot = await cache.ensureQueryData<ConversationSnapshot>({
+            queryKey: runnerKeys.snapshot(conversationId),
+            queryFn: () => client.snapshot(conversationId),
+          });
+          return {
+            botId,
+            conversationId,
+            latestMessage: snapshot.messages.filter((message) => message.text).at(-1)?.text ?? "",
+            executing: snapshot.activeTasks.some((task) => task.status === "running"),
+          };
+        }),
+      );
+      signal.throwIfAborted();
+      return summaries;
+    },
+    staleTime: 1_200,
     retry: false,
     refetchOnWindowFocus: false,
   });

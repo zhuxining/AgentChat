@@ -66,6 +66,8 @@ export function createRequestHandler(runner: Runner) {
         return runner.providerRequest(input.request);
       case "initialize":
         return runner.initialize();
+      case "botSummaries":
+        return runner.botSummaries();
       case "createBot":
         return runner.createBot(botDraft(input));
       case "updateBot":

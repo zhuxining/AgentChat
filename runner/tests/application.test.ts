@@ -300,6 +300,38 @@ describe("Runner typed operations", () => {
     }
   });
 
+  it("projects bounded summaries during execution and switches them to the newest conversation", async () => {
+    const { runner } = await fixture(deterministicModels(400, true));
+    try {
+      const { bot, conversation } = await createChat(runner, "test-model");
+      await runner.submit({
+        conversationId: conversation.id,
+        text: "界".repeat(200),
+        requestId: "summary-run",
+      });
+      const running = await until(
+        () => runner.botSummaries(),
+        (items) => items.some((item) => item.executing),
+      );
+      expect(running).toEqual([
+        {
+          botId: bot.id,
+          conversationId: conversation.id,
+          latestMessage: "界".repeat(160),
+          executing: true,
+        },
+      ]);
+      await reply(runner, conversation.id);
+      expect((await runner.botSummaries())[0]?.latestMessage).toBe("确定性回复");
+      const newest = await runner.createConversation({ botId: bot.id, cwd: "", goal: "" });
+      expect(await runner.botSummaries()).toEqual([
+        { botId: bot.id, conversationId: newest.id, latestMessage: "", executing: false },
+      ]);
+    } finally {
+      await runner.close();
+    }
+  });
+
   it("does not apply configuration changes while accepted work is active", async () => {
     const { runner } = await fixture(deterministicModels(400));
     try {

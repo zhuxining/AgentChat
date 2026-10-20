@@ -62,7 +62,11 @@ export function ChatView({ botId }: { botId: string }) {
       botListOpen: state.botListOpen,
     })),
   );
-  const segments = useBotTimeline(selection.botConversations);
+  const { segments, hasOlder, historyLoading, loadOlder } = useBotTimeline(
+    selection.botConversations,
+    selection.conversationId,
+    selection.snapshot,
+  );
   const messageTexts = segments.flatMap((segment) =>
     segment.snapshot.messages.map((message) => message.text),
   );
@@ -195,6 +199,18 @@ export function ChatView({ botId }: { botId: string }) {
               aria-busy={hasLiveTasks || snapshotLoading}
               className="mx-auto w-full max-w-3xl py-6"
             >
+              {hasOlder && (
+                <div className="mb-4 flex justify-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={historyLoading || connection.runnerUnavailable}
+                    onClick={loadOlder}
+                  >
+                    {historyLoading ? "正在加载更早对话…" : "加载更早对话"}
+                  </Button>
+                </div>
+              )}
               {segments.map((segment, index) => (
                 <Fragment key={segment.conversation.id}>
                   <MessageScrollerItem messageId={`conversation:${segment.conversation.id}`}>
