@@ -18,5 +18,14 @@
         }
       }
     ]
+  },
+  "build": {
+    "beforeDevCommand": "bun run --cwd runner build && vpr dev",
+    "beforeBuildCommand": "bun run build"
+  },
+  "bundle": {
+    "resources": {
+      "../runner/dist/entry.js": "runner/entry.js"
+    }
   }
 }

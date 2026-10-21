@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 
+import { MobileClient } from "@/app/mobile-client";
 import { createAppRouter } from "@/app/router";
 import { RuntimeGate } from "@/app/runtime-gate";
 import { ThemeProvider } from "@/app/theme";
@@ -11,12 +12,17 @@ import { WorkspaceProvider } from "@/app/workspace-provider";
 import { WorkspaceUiProvider } from "@/app/workspace-ui";
 
 export default function App() {
-  // One router per mount keeps navigation state isolated between sessions and tests.
-  const [router] = useState(createAppRouter);
+  const currentPlatform = isTauri() ? platform() : undefined;
+  const mobile = currentPlatform === "android" || currentPlatform === "ios";
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!currentPlatform) return;
 
-    document.documentElement.dataset.platform = platform();
+    document.documentElement.dataset.platform = currentPlatform;
+    if (mobile) {
+      return () => {
+        delete document.documentElement.dataset.platform;
+      };
+    }
     const appWindow = getCurrentWindow();
 
     function handleMouseDown(event: MouseEvent) {
@@ -44,17 +50,22 @@ export default function App() {
       delete document.documentElement.dataset.platform;
       document.removeEventListener("mousedown", handleMouseDown);
     };
-  }, []);
+  }, [currentPlatform, mobile]);
+
+  return <ThemeProvider>{mobile ? <MobileClient /> : <DesktopApp />}</ThemeProvider>;
+}
+
+function DesktopApp() {
+  // One router per mount keeps navigation state isolated between sessions and tests.
+  const [router] = useState(createAppRouter);
 
   return (
-    <ThemeProvider>
-      <RuntimeGate>
-        <WorkspaceProvider>
-          <WorkspaceUiProvider>
-            <RouterProvider router={router} />
-          </WorkspaceUiProvider>
-        </WorkspaceProvider>
-      </RuntimeGate>
-    </ThemeProvider>
+    <RuntimeGate>
+      <WorkspaceProvider>
+        <WorkspaceUiProvider>
+          <RouterProvider router={router} />
+        </WorkspaceUiProvider>
+      </WorkspaceProvider>
+    </RuntimeGate>
   );
 }

@@ -65,13 +65,19 @@ runner/src/
 
 原生宿主将锁文件中已有的 `libc` 声明为 Unix 目标的直接依赖，用于独立进程会话、有效用户 ID 和非阻塞文件描述符等标准系统接口；Windows IPC 使用 Tokio named pipe，并为管道设置仅限当前所有者、SYSTEM 与管理员的 ACL。Node 发行包回退使用 `reqwest` 与 `sha2` 下载、校验和安装归档。没有新增需要随应用分发的 Node runtime；少量 `unsafe` 调用集中在 Unix 宿主与 Windows 安全描述符转换中，并以私有目录、实例锁和有界读写约束其使用。
 
+## 平台打包与启动边界
+
+基础 `tauri.conf.json` 的开发命令只启动前端，构建命令只检查并构建前端。桌面平台配置（macOS、Windows、Linux）分别追加 Runner 构建命令与 `runner/entry.js` 资源，保留桌面窗口行为。移动端沿用基础配置，不携带 Runner 资源；Rust 的后台宿主、Node 检测与 Runner Command 继续限定为 `cfg(desktop)`。
+
+React 入口通过 Tauri OS 平台识别 Android / iOS，与窗口宽度无关。移动端不挂载桌面的 RuntimeGate、工作区 Provider 和路由，不调用本机 Runner IPC，也不绑定桌面拖拽与最大化事件。当前仅显示连接说明；后续移动数据访问应接入 Device Core / Relay，不能直接复用桌面的本机 IPC。
+
 ## 数据所有权与生命周期
 
 期望配置的权威来源是 `runner.json` 与 `bots/<id>/bot.json`，执行数据库保存已确定的 Agent 配置和执行事实。UI 修改请求经 Runner 校验、检查版本并原子写文件；手工编辑在启动或显式重载时读取。默认模板只在创建 Bot 时具体化。配置格式、路径与生效规则见[集成设计](01-pi-durable.md#配置文件)。
 
 默认数据根目录为 `~/.agentchat`，可用绝对路径 `AGENTCHAT_DATA_DIR` 覆盖，不做旧格式或目录迁移。工作区与配置、状态分开，同一 Bot 默认共享工作区，cwd 不提供隔离。密钥存储在系统安全设施，不写 JSON、工具环境或 Projection。
 
-UI 启动先探测 Node 24+。合格时复用；缺失时 macOS 通过 Terminal 引导 Homebrew bootstrap（TUNA、USTC、官方源）并安装 Node，Windows 使用 winget（缺少 App Installer 时打开 Microsoft Store），Linux 仅当 apt 候选版本达到 24 时安装。包管理器失败或安装后仍不合格时，下载官方 Node 发行包，再回退到 npmmirror Node 镜像，安装在 `~/.agentchat/runtimes/node-v24`，不修改用户 PATH，也不替换已有系统 Node。运行时就绪后，UI 先连接已有 Runner，未运行再启动；Unix IPC 使用当前用户权限保护的 socket 和实例锁，Windows IPC 使用拒绝远程连接的命名管道，ACL 限制为当前所有者、SYSTEM 与管理员。后台停止调用 Harness.close 并收尾，保留恢复状态。
+桌面 UI 启动先探测 Node 24+。合格时复用；缺失时 macOS 通过 Terminal 引导 Homebrew bootstrap（TUNA、USTC、官方源）并安装 Node，Windows 使用 winget（缺少 App Installer 时打开 Microsoft Store），Linux 仅当 apt 候选版本达到 24 时安装。包管理器失败或安装后仍不合格时，下载官方 Node 发行包，再回退到 npmmirror Node 镜像，安装在 `~/.agentchat/runtimes/node-v24`，不修改用户 PATH，也不替换已有系统 Node。运行时就绪后，UI 先连接已有 Runner，未运行再启动；Unix IPC 使用当前用户权限保护的 socket 和实例锁，Windows IPC 使用拒绝远程连接的命名管道，ACL 限制为当前所有者、SYSTEM 与管理员。后台停止调用 Harness.close 并收尾，保留恢复状态。
 
 ## 多端规划
 
@@ -83,9 +89,9 @@ Relay 不运行 Harness、不读取工作区或执行 Storage；手机不取得 
 
 本地测试分布在 `tests/`、`runner/tests/` 和 Rust 模块内，覆盖 UI、配置、Harness 操作和宿主协议。此前 macOS 版本已验证真实后台二进制的多客户端关联、单实例、配置重载、过期保存拒绝、显式停止和重开后的配置快照；桌面界面已验证配置读取、停止后台后 UI 保留，以及 UI 进程退出后后台存活和重新连接。未使用真实用户数据或调用真实模型。
 
-前端与 Runner JavaScript 构建、macOS Rust 检查通过。当前 Tauri 资源仅包含 `runner/entry.js`，不携带 Node；此前随包 Node 的 macOS release 冒烟属于历史验证。Node 下载索引与 checksum 路径已核实，但本次未执行下载、包管理器安装或新初始化流程的目标平台冒烟。Windows IPC（含 ACL 与停止状态处理）在隔离 Tokio harness 上通过 `x86_64-pc-windows-gnu` 编译；完整 Tauri Windows 交叉编译仍因缺少 MinGW 编译器未完成，Windows 运行验证仍缺。桌面界面结构及验证范围见 [UI 结构](03-ui-structure.md)。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。
+前端与 Runner JavaScript 构建、macOS Rust 检查通过。当前桌面 Tauri 执行资源仅包含 `runner/entry.js`，不携带 Node；此前随包 Node 的 macOS release 冒烟属于历史验证。Node 下载索引与 checksum 路径已核实，但本次未执行下载、包管理器安装或新初始化流程的目标平台冒烟。Windows IPC（含 ACL 与停止状态处理）在隔离 Tokio harness 上通过 `x86_64-pc-windows-gnu` 编译；完整 Tauri Windows 交叉编译仍因缺少 MinGW 编译器未完成，Windows 运行验证仍缺。桌面界面结构及验证范围见 [UI 结构](03-ui-structure.md)。真实模型、工具中断的跨进程恢复和其他平台仍需专项验证。
 
-多端、Relay、共享契约生成和移动端不列为已实现。库 API 为实验性，具体行为以锁定版本类型和源码为准。
+移动端已分离打包与启动入口，仅展示连接说明页；多端通信、Relay、共享契约生成不列为已实现。库 API 为实验性，具体行为以锁定版本类型和源码为准。
 
 - [产品蓝图](../PRODUCT_BLUEPRINT.md)
 - [UI 结构](03-ui-structure.md)

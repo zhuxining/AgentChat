@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "AgentChat",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 400,
+        "minHeight": 600,
+        "decorations": false,
+        "titleBarStyle": "Transparent"
+      }
+    ]
+  },
+  "build": {
+    "beforeDevCommand": "bun run --cwd runner build && vpr dev",
+    "beforeBuildCommand": "bun run build"
+  },
+  "bundle": {
+    "resources": {
+      "../runner/dist/entry.js": "runner/entry.js"
+    }
+  }
+}

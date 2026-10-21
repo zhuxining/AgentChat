@@ -20,11 +20,28 @@ bun run check
 bun run tauri build --bundles app
 ```
 
-Tauri 安装包不携带 Node。首次启动会检测 Node 24+，找到合格版本后复用且不自动升级。缺失时优先使用本机包管理器：macOS 使用 Homebrew（TUNA → USTC → 官方源；缺少 Homebrew 时在 Terminal 引导安装），Windows 使用 winget（缺少 App Installer 时打开 Microsoft Store），Linux 使用 apt（候选低于 24 时不修改系统源）。包管理器失败或安装后仍不合格时，应用从 Node.js 官方发行源下载；官方源失败后通过 npmmirror 获取对应 Node 24 发行包，并校验同源 `SHASUMS256.txt`、版本、架构和 `node:sqlite`。直接下载的 Node 安装在 `~/.agentchat/runtimes/node-v24`，不修改 PATH；已有不兼容的系统 Node 保持原样。包管理器安装可能由系统请求权限；失败时应用停留在初始化页并允许重试。
+桌面 Tauri 安装包包含 Runner 入口 `runner/entry.js`，不携带 Node。首次启动会检测 Node 24+，找到合格版本后复用且不自动升级。缺失时优先使用本机包管理器：macOS 使用 Homebrew（TUNA → USTC → 官方源；缺少 Homebrew 时在 Terminal 引导安装），Windows 使用 winget（缺少 App Installer 时打开 Microsoft Store），Linux 使用 apt（候选低于 24 时不修改系统源）。包管理器失败或安装后仍不合格时，应用从 Node.js 官方发行源下载；官方源失败后通过 npmmirror 获取对应 Node 24 发行包，并校验同源 `SHASUMS256.txt`、版本、架构和 `node:sqlite`。直接下载的 Node 安装在 `~/.agentchat/runtimes/node-v24`，不修改 PATH；已有不兼容的系统 Node 保持原样。包管理器安装可能由系统请求权限；失败时应用停留在初始化页并允许重试。
 
 Runner IPC 已实现 Unix socket 与 Windows 命名管道；Windows 管道拒绝远程连接，ACL 限制为当前所有者、SYSTEM 与管理员，不开放网络端口。macOS arm64 的新版本 `.app` 已完成构建；Linux 与 Windows 的目标平台构建和真实安装/启动流程仍需验收。完整 Windows 交叉编译受限于开发机缺少 MinGW 编译器；隔离 Tokio harness 中，Windows `host.rs` 生命周期分支与 `host/windows.rs` 均已通过 `x86_64-pc-windows-gnu` 编译。
 
 Tauri 的版本检查要求 Rust crate 与对应的 `@tauri-apps/*` 包处于同一 major.minor，因此 `src-tauri/Cargo.toml` 用 `~` 固定到 `package.json` 声明的 minor。升级任一侧时必须同步另一侧，并保留 `Cargo.lock`：`tauri-plugin-updater` 的可选 Windows 依赖 `zip ^4` 目前所有已发布版本都被 yank，全量 `cargo update` 无法重新解析，只能依赖锁文件中已固定的 `zip 4.6.1`。
+
+## 移动端开发与构建
+
+完成 Tauri Android / iOS 初始化并安装对应 SDK 后运行：
+
+```bash
+bun run tauri android dev
+bun run tauri android build
+bun run tauri ios dev
+bun run tauri ios build
+```
+
+iOS 需要 Xcode 及对应模拟器 runtime 或已配置签名的真机。Android 需要 Android SDK、JDK 和已启动的模拟器或真机。
+
+基础 `tauri.conf.json` 只启动前端开发服务器，打包时执行 `bun run build:frontend`。macOS、Windows、Linux 平台配置额外构建并携带 Runner；Android / iOS 不构建、不打包 Runner，也不检测或安装 Node、不启动本机后台。
+
+移动端当前启动到连接说明页，不进入桌面的 Node 初始化和工作区查询流程。设计目标是通过独立 Relay 连接 Runner；Device Core、设备配对与同步尚未实现，因此当前手机端还不能查看真实对话或发送消息。
 
 ## 使用与生命周期
 
@@ -84,6 +101,6 @@ UI 保存携带内容版本，文件被外部编辑后拒绝过期覆盖；Runne
 
 UI 测试位于 `tests/ui/`，Runner 测试位于 `runner/tests/`，Rust 模块内有协议和宿主测试。macOS 已使用临时数据目录验证独立后台、多客户端关联、配置读写与重载、停止、UI 进程退出后后台存活和重新连接；Harness 单元集成测试验证了已接纳工作的关闭/重开恢复。本轮未调用真实模型，工具中断的跨进程恢复仍待验证。
 
-前端、Runner JavaScript 和 macOS Rust 构建通过；Tauri 打包的 JS/Rust 版本不匹配已修复（两侧统一在同一 major.minor）。此前随包 Node 版本的 macOS arm64 release 冒烟属于历史验证；当前 `.app` 只包含 Runner 入口，不带 Node。Node 下载索引与 checksum 路径已核实，但没有在目标平台执行下载、包管理器安装或新初始化流程冒烟。本次 Windows IPC 与宿主生命周期模块通过隔离 Tokio harness 编译；完整 Windows Tauri 交叉编译仍缺 MinGW，Windows 运行验证仍缺。本轮未调用真实模型；手机、Device Core 与 Relay 尚未实现。
+前端、Runner JavaScript 和 macOS Rust 构建通过；Tauri 打包的 JS/Rust 版本不匹配已修复（两侧统一在同一 major.minor）。此前随包 Node 版本的 macOS arm64 release 冒烟属于历史验证；当前 `.app` 只包含 Runner 入口，不带 Node。Node 下载索引与 checksum 路径已核实，但没有在目标平台执行下载、包管理器安装或新初始化流程冒烟。本次 Windows IPC 与宿主生命周期模块通过隔离 Tokio harness 编译；完整 Windows Tauri 交叉编译仍缺 MinGW，Windows 运行验证仍缺。本轮未调用真实模型；移动端已有独立启动页；Device Core、设备配对与 Relay 同步尚未实现。
 
 设计入口：[产品蓝图](docs/PRODUCT_BLUEPRINT.md)、[架构总览](docs/architecture/00-overview.md)、[UI 结构](docs/architecture/03-ui-structure.md)、[多端规划](docs/architecture/02-multi-device.md)、[术语表](GLOSSARY.md)。

@@ -4,22 +4,16 @@
   "version": "0.1.0",
   "identifier": "com.syneju.agentchat",
   "build": {
-    "beforeDevCommand": "bun run --cwd runner build && vpr dev",
+    "beforeDevCommand": "vpr dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build:frontend",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
   "app": {
     "windows": [
       {
-        "title": "AgentChat",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 400,
-        "minHeight": 600,
-        "decorations": false,
-        "titleBarStyle": "Transparent"
+        "title": "AgentChat"
       }
     ],
     "security": {
@@ -30,9 +24,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "../runner/dist/entry.js": "runner/entry.js"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
