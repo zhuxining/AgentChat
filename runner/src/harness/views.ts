@@ -1,4 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   AgentDoc,
   UsageDoc,
@@ -10,9 +12,18 @@ import {
 import type { Bot } from "../config/configuration.js";
 import type { createAgentResolver } from "./agent.js";
 import { GoalState } from "./extensions/work-goal.js";
-import { readProjectedMessages } from "./messages.js";
+import {
+  readChatHistoryConversationPage,
+  readProjectedMessages,
+  type ChatHistoryMessage,
+  type ConversationHistoryScan,
+} from "./messages.js";
 import { conversationById } from "./operations/index.js";
-import { ConversationMetadata, type ConversationSummary } from "./product-state.js";
+import {
+  ConversationIndex,
+  ConversationMetadata,
+  type ConversationSummary,
+} from "./product-state.js";
 
 export type BotListSummary = {
   botId: string;
@@ -88,12 +99,52 @@ function summarizeUsage(state: UsageState | undefined): ConversationUsage {
 }
 
 const context = BACKGROUND_CONTEXT;
+const chatHistoryPageSize = 50;
+const maxHistoryCursorLength = 16_384;
+
+type EncodedHistoryCursor = {
+  version: 1;
+  anchorConversationId: number;
+  botId: string;
+  conversationId: number;
+  scan: ConversationHistoryScan;
+};
+
 export function createViews(
   harness: Harness,
   storage: Storage,
   resolver: ReturnType<typeof createAgentResolver>,
   isConfigured: (providerId: string | undefined) => Promise<boolean> | boolean,
 ) {
+  const historyCursorKey = randomBytes(32);
+
+  function encodeHistoryCursor(cursor: EncodedHistoryCursor): string {
+    const payload = Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+    const signature = createHmac("sha256", historyCursorKey).update(payload).digest("base64url");
+    const token = `${payload}.${signature}`;
+    if (token.length > maxHistoryCursorLength) throw new Error("历史游标无效");
+    return token;
+  }
+
+  function decodeHistoryCursor(token: string): EncodedHistoryCursor {
+    if (token.length > maxHistoryCursorLength) throw new Error("历史游标无效");
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra !== undefined) throw new Error("历史游标无效");
+    const supplied = Buffer.from(signature, "base64url");
+    const expected = createHmac("sha256", historyCursorKey).update(payload).digest();
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      throw new Error("历史游标无效");
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    } catch {
+      throw new Error("历史游标无效");
+    }
+    if (!isHistoryCursor(value)) throw new Error("历史游标无效");
+    return value;
+  }
+
   async function configurationErrors(conversation: { id: Parameters<Harness["conversation"]>[0] }) {
     const agent = await harness.snapshot(AgentDoc, conversation.id, context);
     return resolver.missing(agent?.extensions, agent?.tools);
@@ -155,6 +206,73 @@ export function createViews(
       graph.dispose();
     }
   }
+  async function chatHistory(
+    anchorConversationId: number,
+    token: string | null,
+  ): Promise<{ messages: ChatHistoryMessage[]; cursor: string | null }> {
+    const index = await harness.snapshot(ConversationIndex, context);
+    const allConversations = [...(index?.conversations ?? [])].sort(
+      (left, right) => left.createdAt - right.createdAt || left.id - right.id,
+    );
+    const anchor = allConversations.find((conversation) => conversation.id === anchorConversationId);
+    if (!anchor) throw new Error("Conversation 不存在");
+    const conversations = allConversations.filter((conversation) => conversation.botId === anchor.botId);
+    const anchorIndex = conversations.findIndex((conversation) => conversation.id === anchor.id);
+    const current = token
+      ? decodeHistoryCursor(token)
+      : {
+          version: 1 as const,
+          anchorConversationId,
+          botId: anchor.botId,
+          conversationId: anchorConversationId,
+          scan: {},
+        };
+    if (current.anchorConversationId !== anchorConversationId || current.botId !== anchor.botId) {
+      throw new Error("历史游标无效");
+    }
+    let currentIndex = conversations.findIndex(
+      (conversation) => conversation.id === current.conversationId,
+    );
+    if (currentIndex < 0 || currentIndex > anchorIndex) throw new Error("历史游标无效");
+
+    const messages: ChatHistoryMessage[] = [];
+    let nextCursor: EncodedHistoryCursor | undefined = current;
+    while (messages.length < chatHistoryPageSize && nextCursor) {
+      currentIndex = conversations.findIndex(
+        (conversation) => conversation.id === nextCursor?.conversationId,
+      );
+      if (currentIndex < 0 || currentIndex > anchorIndex) throw new Error("历史游标无效");
+      const summary = conversations[currentIndex];
+      if (!summary) throw new Error("历史游标无效");
+      const conversation = await conversationById(harness, summary.id);
+      const page = await readChatHistoryConversationPage(
+        storage,
+        conversation.id,
+        nextCursor.scan,
+        chatHistoryPageSize - messages.length,
+      );
+      messages.push(...page.messages);
+      if (!page.done) {
+        nextCursor = { ...nextCursor, scan: page.scan };
+        break;
+      }
+      const previous = conversations[currentIndex - 1];
+      nextCursor = previous
+        ? {
+            version: 1,
+            anchorConversationId,
+            botId: anchor.botId,
+            conversationId: previous.id,
+            scan: {},
+          }
+        : undefined;
+    }
+    return {
+      messages: messages.reverse(),
+      cursor: nextCursor ? encodeHistoryCursor(nextCursor) : null,
+    };
+  }
+
   async function botSummaries(
     bots: Bot[],
     conversations: ConversationSummary[],
@@ -196,5 +314,53 @@ export function createViews(
       graph.dispose();
     }
   }
-  return { snapshot, botSummaries };
+  return { snapshot, chatHistory, botSummaries };
+}
+
+function isHistoryCursor(value: unknown): value is EncodedHistoryCursor {
+  if (!isRecord(value)) return false;
+  const scan = value.scan;
+  if (
+    value.version !== 1 ||
+    !isPositiveInteger(value.anchorConversationId) ||
+    typeof value.botId !== "string" ||
+    !value.botId ||
+    !isPositiveInteger(value.conversationId) ||
+    !isRecord(scan)
+  ) {
+    return false;
+  }
+  const validEntryId = (id: unknown) => id === null || isPositiveInteger(id);
+  return (
+    (scan.headMarkerId === undefined || validEntryId(scan.headMarkerId)) &&
+    (scan.tailId === undefined || validEntryId(scan.tailId)) &&
+    (scan.minEntryId === undefined || validEntryId(scan.minEntryId)) &&
+    (scan.cursor === undefined || isPiCursor(scan.cursor))
+  );
+}
+
+function isPiCursor(value: unknown): value is NonNullable<ConversationHistoryScan["cursor"]> {
+  return isRecord(value) && Object.values(value).every((item) => isJsonValue(item));
+}
+
+function isJsonValue(value: unknown, depth = 0): value is JsonValue {
+  if (depth > 12) return false;
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every((item) => isJsonValue(item, depth + 1));
+  return isRecord(value) && Object.values(value).every((item) => isJsonValue(item, depth + 1));
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -12,7 +12,7 @@ import {
   SquareIcon,
   XIcon,
 } from "lucide-react";
-import { Fragment } from "react";
+import { useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { useWorkspaceUi } from "@/app/workspace-ui";
@@ -50,7 +50,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { formatDate } from "@/features/chat/format-date";
 import { MessageBody } from "@/features/chat/message-content";
 import { useBotChat } from "@/features/chat/use-bot-chat";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
@@ -88,20 +87,32 @@ export function ChatView({ botId }: { botId: string }) {
       botListOpen: state.botListOpen,
     })),
   );
-  const { segments, hasOlder, historyLoading, loadOlder } = useBotTimeline(
+  const {
+    messages,
+    historyLoading,
+    historyError,
+    historyHasPages,
+    loadOlder,
+  } = useBotTimeline(
     selection.botConversations,
     selection.conversationId,
     selection.snapshot,
   );
-  const messageTexts = segments.flatMap((segment) =>
-    segment.snapshot.messages.map((message) => message.text),
-  );
-  const latestSegment = segments.at(-1);
-  const latestMessage = latestSegment?.snapshot.messages
-    .filter((message) => message.text && (message.role === "user" || message.role === "assistant"))
-    .at(-1);
-  const latestRowId =
-    latestSegment && latestMessage ? rowId(latestSegment.conversation.id, latestMessage.id) : null;
+  const messageTexts = messages.map((message) => message.text);
+  const latestMessage = messages.at(-1);
+  const latestRowId = latestMessage
+    ? rowId(latestMessage.conversationId, latestMessage.id)
+    : null;
+  const previousScrollTop = useRef(0);
+  const touchStartY = useRef<number | null>(null);
+  const touchTriggeredHistory = useRef(false);
+  const scrollConversationId = useRef(selection.conversationId);
+  if (scrollConversationId.current !== selection.conversationId) {
+    scrollConversationId.current = selection.conversationId;
+    previousScrollTop.current = 0;
+    touchStartY.current = null;
+    touchTriggeredHistory.current = false;
+  }
   const snapshot = selection.snapshot;
   const snapshotUnavailable =
     selection.conversationId !== null &&
@@ -357,62 +368,85 @@ export function ChatView({ botId }: { botId: string }) {
       )}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport className="px-5">
+          <MessageScrollerViewport
+            className="px-5"
+            preserveScrollOnPrepend
+            onScroll={(event) => {
+              const scrollTop = event.currentTarget.scrollTop;
+              const reachedTop = scrollTop <= 48 && previousScrollTop.current > 48;
+              previousScrollTop.current = scrollTop;
+              if (reachedTop) loadOlder();
+            }}
+            onWheel={(event) => {
+              if (event.deltaY < 0 && event.currentTarget.scrollTop <= 48) loadOlder();
+            }}
+            onTouchStart={(event) => {
+              touchStartY.current = event.touches[0]?.clientY ?? null;
+              touchTriggeredHistory.current = false;
+            }}
+            onTouchMove={(event) => {
+              const startY = touchStartY.current;
+              const currentY = event.touches[0]?.clientY;
+              if (
+                startY !== null &&
+                currentY !== undefined &&
+                currentY - startY > 12 &&
+                event.currentTarget.scrollTop <= 48 &&
+                !touchTriggeredHistory.current
+              ) {
+                touchTriggeredHistory.current = true;
+                loadOlder();
+              }
+            }}
+            onTouchEnd={() => {
+              touchStartY.current = null;
+              touchTriggeredHistory.current = false;
+            }}
+          >
             <MessageScrollerContent
               aria-busy={hasLiveTasks || snapshotLoading}
               className="mx-auto w-full max-w-3xl py-6"
             >
-              {hasOlder && (
-                <div className="mb-4 flex justify-center">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={historyLoading || connection.runnerUnavailable}
-                    onClick={loadOlder}
-                  >
-                    {historyLoading ? "正在加载更早对话…" : "加载更早对话"}
-                  </Button>
-                </div>
+              {historyLoading && hasConversation && (
+                <MessageScrollerItem messageId="history:loading">
+                  <Marker role="status" aria-label="正在加载更早消息">
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent>
+                      {historyHasPages ? "正在同步聊天记录…" : "正在加载聊天记录…"}
+                    </MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
               )}
-              {segments.map((segment, index) => (
-                <Fragment key={segment.conversation.id}>
-                  <MessageScrollerItem messageId={`conversation:${segment.conversation.id}`}>
-                    <Marker variant="separator" className="animate-fade-in">
-                      <MarkerContent>
-                        {index === 0
-                          ? formatDate(segment.conversation.createdAt)
-                          : `新会话 · ${formatDate(segment.conversation.createdAt)}`}
-                      </MarkerContent>
-                    </Marker>
-                  </MessageScrollerItem>
-                  {segment.snapshot.messages
-                    .filter(
-                      (message) =>
-                        message.text && (message.role === "user" || message.role === "assistant"),
-                    )
-                    .map((message) => (
-                      <MessageScrollerItem
-                        key={rowId(segment.conversation.id, message.id)}
-                        messageId={rowId(segment.conversation.id, message.id)}
-                        className={
-                          rowId(segment.conversation.id, message.id) === animatedRowId
-                            ? message.role === "user"
-                              ? "animate-message-in-end"
-                              : "animate-message-in"
-                            : undefined
-                        }
-                      >
-                        <MessageBody
-                          message={message}
-                          streaming={
-                            rowId(segment.conversation.id, message.id) === latestRowId &&
-                            hasLiveTasks
-                          }
-                          texts={messageTexts}
-                        />
-                      </MessageScrollerItem>
-                    ))}
-                </Fragment>
+              {historyError && !historyLoading && (
+                <MessageScrollerItem messageId="history:error">
+                  <Marker role="status" aria-label="更早消息读取失败">
+                    <MarkerContent>更早消息暂时无法读取；再次滚动到顶部重试。</MarkerContent>
+                  </Marker>
+                </MessageScrollerItem>
+              )}
+              {messages.map((message) => (
+                <MessageScrollerItem
+                  key={rowId(message.conversationId, message.id)}
+                  messageId={rowId(message.conversationId, message.id)}
+                  scrollAnchor
+                  className={
+                    rowId(message.conversationId, message.id) === animatedRowId
+                      ? message.role === "user"
+                        ? "animate-message-in-end"
+                        : "animate-message-in"
+                      : undefined
+                  }
+                >
+                  <MessageBody
+                    message={message}
+                    streaming={
+                      rowId(message.conversationId, message.id) === latestRowId && hasLiveTasks
+                    }
+                    texts={messageTexts}
+                  />
+                </MessageScrollerItem>
               ))}
               {!hasConversation && (
                 <MessageScrollerItem messageId="empty">
@@ -470,18 +504,16 @@ export function ChatView({ botId }: { botId: string }) {
                   </Marker>
                 </MessageScrollerItem>
               )}
-              {hasConversation &&
-                snapshot &&
-                segments.every((segment) => segment.snapshot.messages.length === 0) && (
-                  <MessageScrollerItem messageId="empty-conversation">
-                    <Empty className="animate-fade-in min-h-40">
-                      <EmptyHeader>
-                        <EmptyTitle>开始这次对话</EmptyTitle>
-                        <EmptyDescription>输入第一条消息，Bot 会接着往下做。</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  </MessageScrollerItem>
-                )}
+              {hasConversation && snapshot && messages.length === 0 && !historyLoading && (
+                <MessageScrollerItem messageId="empty-conversation">
+                  <Empty className="animate-fade-in min-h-40">
+                    <EmptyHeader>
+                      <EmptyTitle>开始这次对话</EmptyTitle>
+                      <EmptyDescription>输入第一条消息，Bot 会接着往下做。</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                </MessageScrollerItem>
+              )}
               {currentSubmissionPending && (
                 <MessageScrollerItem messageId="status:pending">
                   <Marker role="status" className="animate-fade-in">

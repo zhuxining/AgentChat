@@ -10,6 +10,7 @@ import type { McpServerConfiguration } from "../config/schema.js";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const SHUTDOWN_TIMEOUT_MS = 2_500;
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const MAX_SCHEMA_NODES = 256;
 const MAX_SCHEMA_DEPTH = 12;
@@ -433,6 +434,27 @@ function outputText(result: {
   return textResult(output, result.isError === true);
 }
 
+function abortError(): Error {
+  const error = new Error("MCP 工具调用已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+function waitAtMost(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export function createMcpServerManager(
   registry: ReturnType<typeof import("./registry.js").createRunnerRegistry>,
   dataDir: string,
@@ -441,7 +463,9 @@ export function createMcpServerManager(
   const retired = new Set<ServerEntry>();
   const statuses = new Map<string, McpServerStatus>();
   const names = new Map<string, string>();
+  const activeCalls = new Set<AbortController>();
   let closed = false;
+  let closePromise: Promise<void> | undefined;
 
   function installFailure(configuration: McpServerConfiguration, message: string) {
     statuses.set(configuration.id, {
@@ -456,11 +480,12 @@ export function createMcpServerManager(
 
   function closeEntry(entry: ServerEntry) {
     if (!entry.closePromise) {
-      entry.closePromise = (async () => {
-        await entry.client.close().catch(() => undefined);
-        await entry.transport.close().catch(() => undefined);
+      entry.closePromise = Promise.allSettled([
+        Promise.resolve().then(() => entry.client.close()),
+        Promise.resolve().then(() => entry.transport.close()),
+      ]).then(() => {
         retired.delete(entry);
-      })();
+      });
     }
     return entry.closePromise;
   }
@@ -560,19 +585,31 @@ export function createMcpServerManager(
             description: tool.description || `MCP 工具 ${tool.name}`,
             parameters,
             replay: "unsafe",
-            async execute(args) {
+            async execute(args, _api, context) {
               if (entry.retired || entries.get(configuration.id) !== entry)
                 return textResult("MCP 工具当前不可用，请重载连接后重试。", true);
+              const shutdownController = new AbortController();
+              activeCalls.add(shutdownController);
+              const signal = context.abortSignal
+                ? AbortSignal.any([context.abortSignal, shutdownController.signal])
+                : shutdownController.signal;
               entry.calls++;
               try {
+                if (signal.aborted) throw abortError();
                 const result = await client.callTool(
                   { name: tool.name, arguments: args as Record<string, unknown> },
-                  { timeout: REQUEST_TIMEOUT_MS },
+                  { timeout: REQUEST_TIMEOUT_MS, signal },
                 );
                 return outputText(result);
-              } catch {
+              } catch (error) {
+                if (signal.aborted) {
+                  if (error instanceof Error && error.name === "AbortError") throw error;
+                  throw abortError();
+                }
+                if (error instanceof Error && error.name === "AbortError") throw error;
                 return textResult("MCP 工具调用失败。", true);
               } finally {
+                activeCalls.delete(shutdownController);
                 entry.calls--;
                 if (entry.retired && entry.calls === 0) entry.drain();
               }
@@ -628,29 +665,18 @@ export function createMcpServerManager(
     displayName(toolName: string): string | undefined {
       return names.get(toolName);
     },
-    async close() {
-      if (closed) return;
+    close() {
+      if (closePromise) return closePromise;
       closed = true;
       for (const [id, entry] of entries) {
         entries.delete(id);
         registry.uninstall({ name: entry.extensionName });
         retireEntry(entry);
       }
-      const pending = [...retired];
-      await Promise.all(
-        pending.map(async (entry) => {
-          if (entry.calls === 0) await closeEntry(entry);
-          else {
-            await Promise.race([
-              entry.drained,
-              new Promise<void>((resolveDrain) =>
-                setTimeout(resolveDrain, REQUEST_TIMEOUT_MS + 1_000),
-              ),
-            ]);
-            await closeEntry(entry);
-          }
-        }),
-      );
+      for (const controller of activeCalls) controller.abort(abortError());
+      const cleanup = Promise.all([...retired].map((entry) => closeEntry(entry)));
+      closePromise = waitAtMost(cleanup, SHUTDOWN_TIMEOUT_MS);
+      return closePromise;
     },
   };
 }

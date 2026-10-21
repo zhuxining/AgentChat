@@ -69,6 +69,16 @@ export type ProjectedMessage = {
   text: string;
   truncated: boolean;
 };
+export type ChatHistoryMessage = {
+  id: number;
+  conversationId: number;
+  role: "user" | "assistant";
+  text: string;
+};
+export type ChatHistoryPage = {
+  messages: ChatHistoryMessage[];
+  cursor: string | null;
+};
 export type ConversationUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -169,6 +179,7 @@ export type RunnerRequest =
   | { op: "setGoalStatus"; conversationId: number; status: "open" | "completed" }
   | { op: "abortSubmission"; conversationId: number; submissionId: number }
   | { op: "snapshot"; conversationId: number }
+  | { op: "chatHistory"; conversationId: number; cursor: string | null }
   | { op: "botSummaries" }
   | { op: "abort"; conversationId: number };
 type RunnerReply<T> = { result: T | null };
@@ -233,6 +244,8 @@ export const runnerClient = {
     }),
   snapshot: (conversationId: number) =>
     request<ConversationSnapshot>({ op: "snapshot", conversationId }),
+  chatHistory: (conversationId: number, cursor: string | null) =>
+    request<ChatHistoryPage>({ op: "chatHistory", conversationId, cursor }),
   botSummaries: () => request<BotListSummary[]>({ op: "botSummaries" }),
   abort: (conversationId: number) => request<{ stopped: boolean }>({ op: "abort", conversationId }),
   startRunner: () => invoke<void>("start_runner"),

@@ -3,6 +3,7 @@ import type {
   Conversation,
   ConversationId,
   Cursor,
+  EntryId,
   EntryRecord,
   Storage,
 } from "@earendil-works/pi-durable";
@@ -18,6 +19,20 @@ type MessageProjection = {
   text: string;
   truncated: boolean;
 };
+export type ChatHistoryMessage = {
+  id: number;
+  conversationId: number;
+  role: "user" | "assistant";
+  text: string;
+};
+export type ConversationHistoryScan = {
+  tailId?: EntryId | null;
+  headMarkerId?: EntryId | null;
+  minEntryId?: EntryId | null;
+  cursor?: Cursor;
+};
+
+const maxChatHistoryPageMessages = 50;
 
 export async function readProjectedMessages(storage: Storage, conversationId: ConversationId) {
   const context = BACKGROUND_CONTEXT;
@@ -48,44 +63,114 @@ export async function readProjectedMessages(storage: Storage, conversationId: Co
   return projectMessages(entries);
 }
 
+// Chat uses a separate unbounded-text projection. Snapshot callers keep their small bounded view.
+export async function readChatHistoryConversationPage(
+  storage: Storage,
+  conversationId: ConversationId,
+  scan: ConversationHistoryScan,
+  limit: number,
+): Promise<{ messages: ChatHistoryMessage[]; scan: ConversationHistoryScan; done: boolean }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > maxChatHistoryPageMessages) {
+    throw new Error("历史分页大小无效");
+  }
+  let tailId = scan.tailId;
+  let headMarkerId = scan.headMarkerId;
+  let minEntryId = scan.minEntryId;
+  let cursor = scan.cursor;
+  if (tailId === undefined) {
+    const tail = (await storage.scanEntries({ conversationId }, 1, undefined, BACKGROUND_CONTEXT))
+      .items[0];
+    if (!tail) return { messages: [], scan: { tailId: null }, done: true };
+    tailId = tail.id;
+    const headMarker = await storage.findLatestHeadMarker(conversationId, tail.id, BACKGROUND_CONTEXT);
+    headMarkerId = headMarker?.id ?? null;
+    minEntryId = headMarker?.head ?? null;
+  }
+  if (tailId === null) return { messages: [], scan: { tailId: null }, done: true };
+
+  // A branch switch appends a new active head marker. Refuse to continue a cursor
+  // whose frozen range no longer matches the Conversation's current active branch.
+  if (headMarkerId !== undefined) {
+    const activeHeadMarker = await storage.findLatestHeadMarker(conversationId, undefined, BACKGROUND_CONTEXT);
+    if ((activeHeadMarker?.id ?? null) !== headMarkerId || (activeHeadMarker?.head ?? null) !== minEntryId) {
+      throw new Error("历史游标无效");
+    }
+  }
+
+  const messages: ChatHistoryMessage[] = [];
+  let done = false;
+  while (messages.length < limit) {
+    const query = {
+      conversationId,
+      maxEntryId: tailId,
+      ...(minEntryId === null || minEntryId === undefined ? {} : { minEntryId }),
+    };
+    const page = await storage.scanEntries(query, limit - messages.length, cursor, BACKGROUND_CONTEXT);
+    for (const entry of page.items) {
+      if (entry.head !== undefined) continue;
+      const projected = projectMessage(entry, false);
+      if ((projected.role !== "user" && projected.role !== "assistant") || !projected.text) continue;
+      messages.push({
+        id: entry.id,
+        conversationId,
+        role: projected.role,
+        text: projected.text,
+      });
+    }
+    cursor = page.next;
+    if (page.next === undefined || page.items.length === 0) {
+      done = true;
+      break;
+    }
+  }
+  return {
+    messages,
+    scan: { tailId, headMarkerId, minEntryId, ...(cursor ? { cursor } : {}) },
+    done,
+  };
+}
+
 export function projectMessages(entries: Entries) {
-  const messages: MessageProjection[] = entries.slice(-maxProjectedMessages).map((entry) => {
-    const model = entry.model?.[0] as { role?: string; content?: unknown } | undefined;
-    // User entries use string content; assistant/tool entries may use structured blocks.
-    const text =
-      typeof model?.content === "string"
-        ? model.content
-        : Array.isArray(model?.content)
-          ? model.content
-              .map((part) => {
-                if (!part || typeof part !== "object") return "";
-                const item = part as { type?: string; text?: string; name?: string };
-                if (item.type === "text") return item.text ?? "";
-                if (item.type === "toolCall") return `调用工具：${item.name ?? "工具"}`;
-                return "";
-              })
-              .filter(Boolean)
-              .join("\n")
-          : "";
-    const role =
-      model?.role === "user"
-        ? "user"
-        : model?.role === "assistant"
-          ? "assistant"
-          : model?.role === "system"
-            ? "system"
-            : "tool";
-    const displayText =
-      role === "user"
-        ? (projectAttachmentInput(entry, text) ??
-          (entry.kind === attachmentInputEntryKind
-            ? "[附件消息已隐藏]"
-            : redactLegacyAttachmentText(entry.kind, text)))
-        : text;
-    const limitedText = limitText(displayText);
-    return { id: entry.id, role, text: limitedText.text, truncated: limitedText.truncated };
-  });
+  const messages: MessageProjection[] = entries
+    .slice(-maxProjectedMessages)
+    .map((entry) => projectMessage(entry, true));
   return { messages, hasMoreMessages: entries.length > maxProjectedMessages };
+}
+
+function projectMessage(entry: Entries[number], bounded: boolean): MessageProjection {
+  const model = entry.model?.[0] as { role?: string; content?: unknown } | undefined;
+  // User entries use string content; assistant/tool entries may have structured blocks.
+  const text =
+    typeof model?.content === "string"
+      ? model.content
+      : Array.isArray(model?.content)
+        ? model.content
+            .map((part) => {
+              if (!part || typeof part !== "object") return "";
+              const item = part as { type?: string; text?: string };
+              if (item.type === "text") return item.text ?? "";
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n")
+        : "";
+  const role =
+    model?.role === "user"
+      ? "user"
+      : model?.role === "assistant"
+        ? "assistant"
+        : model?.role === "system"
+          ? "system"
+          : "tool";
+  const displayText =
+    role === "user"
+      ? (projectAttachmentInput(entry, text) ??
+        (entry.kind === attachmentInputEntryKind
+          ? "[附件消息已隐藏]"
+          : redactLegacyAttachmentText(entry.kind, text)))
+      : text;
+  const limitedText = bounded ? limitText(displayText) : { text: displayText, truncated: false };
+  return { id: entry.id, role, text: limitedText.text, truncated: limitedText.truncated };
 }
 
 function projectAttachmentInput(entry: Entries[number], content: string): string | undefined {

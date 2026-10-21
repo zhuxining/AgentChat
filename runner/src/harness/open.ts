@@ -25,6 +25,23 @@ import { harnessSettings } from "./settings.js";
 import { createViews } from "./views.js";
 
 const context = BACKGROUND_CONTEXT;
+const CLOSE_TIMEOUT_MS = 4_000;
+
+function waitAtMost(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export type RunnerOptions = {
   dataDir: string;
   models?: MutableModels;
@@ -132,6 +149,7 @@ export async function openRunner({
   let openedProviders: string | undefined;
   let active: Awaited<ReturnType<typeof start>> | undefined;
   let closing = false;
+  let closePromise: Promise<{ closed: true }> | undefined;
   const authStatus = createAuthStatus(
     async (id) => (providedModels ? provider.isConfigured() : Boolean(await models.checkAuth(id))),
     () => `${authRevision}:${providerState.credentialRevision}`,
@@ -183,7 +201,15 @@ export async function openRunner({
     return { harness, storage, operations, ...views };
   }
   async function ensureStarted() {
-    if (!active && configuration.runner) active = await start();
+    if (closing) return;
+    if (!active && configuration.runner) {
+      const started = await start();
+      if (closing) {
+        await started.operations.mutate(() => started.harness.close(context));
+        return;
+      }
+      active = started;
+    }
   }
   function execution() {
     if (closing) throw new Error("Runner 正在关闭");
@@ -413,6 +439,7 @@ export async function openRunner({
       execution().operations.abortSubmission(id, submissionId),
     abort: (id: number) => execution().operations.abort(id),
     snapshot: (id: number) => execution().snapshot(id),
+    chatHistory: (id: number, cursor: string | null) => execution().chatHistory(id, cursor),
     botSummaries: async () => {
       const current = execution();
       return current.botSummaries(configuration.bots(), await current.operations.conversations());
@@ -422,17 +449,20 @@ export async function openRunner({
       authRevision++;
       return result;
     },
-    close: async () => {
+    close: () => {
+      if (closePromise) return closePromise;
       closing = true;
-      await configQueue;
-      await providers.close();
+      const cleanup: Promise<unknown>[] = [configQueue, providers.close(), mcp.close()];
       if (active) {
         const current = active;
-        await current.operations.mutate(() => current.harness.close(context));
-        active = undefined;
+        cleanup.push(current.operations.mutate(() => current.harness.close(context)));
       }
-      await mcp.close();
-      return { closed: true };
+      closePromise = (async () => {
+        await waitAtMost(Promise.allSettled(cleanup), CLOSE_TIMEOUT_MS);
+        active = undefined;
+        return { closed: true };
+      })();
+      return closePromise;
     },
   };
 }

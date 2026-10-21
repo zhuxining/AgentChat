@@ -191,6 +191,20 @@ export function createRequestHandler(runner: Runner) {
         return runner.abort(id(input, "conversationId"));
       case "snapshot":
         return runner.snapshot(id(input, "conversationId"));
+      case "chatHistory": {
+        const cursor = input.cursor;
+        if (
+          cursor !== undefined &&
+          cursor !== null &&
+          (typeof cursor !== "string" || cursor.length > 16_384)
+        ) {
+          throw new Error("字段 cursor 无效");
+        }
+        return runner.chatHistory(
+          id(input, "conversationId"),
+          typeof cursor === "string" ? cursor : null,
+        );
+      }
       case "setProviderCredential":
         return runner.setProviderCredential(input.apiKey);
       case "close":
