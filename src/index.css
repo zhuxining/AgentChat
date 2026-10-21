@@ -222,6 +222,46 @@
   --chart-5: oklch(0.275 0.011 216.9);
 }
 
+:root {
+  --app-font-size-scale: 1;
+}
+
+:root[data-font-size="small"] {
+  --app-font-size-scale: 0.9;
+}
+
+:root[data-font-size="large"] {
+  --app-font-size-scale: 1.1;
+}
+
+:root[data-font-size] {
+  --text-xs: calc(0.75rem * var(--app-font-size-scale));
+  --text-sm: calc(0.875rem * var(--app-font-size-scale));
+  --text-base: calc(1rem * var(--app-font-size-scale));
+  --text-lg: calc(1.125rem * var(--app-font-size-scale));
+  --text-xl: calc(1.25rem * var(--app-font-size-scale));
+  --text-2xl: calc(1.5rem * var(--app-font-size-scale));
+  --text-3xl: calc(1.875rem * var(--app-font-size-scale));
+  --text-4xl: calc(2.25rem * var(--app-font-size-scale));
+  --text-5xl: calc(3rem * var(--app-font-size-scale));
+  --text-6xl: calc(3.75rem * var(--app-font-size-scale));
+  --text-7xl: calc(4.5rem * var(--app-font-size-scale));
+  --text-8xl: calc(6rem * var(--app-font-size-scale));
+  --text-9xl: calc(8rem * var(--app-font-size-scale));
+}
+
+:root[data-font-size] [class~="text-[0.8rem]"] {
+  font-size: calc(0.8rem * var(--app-font-size-scale));
+}
+
+:root[data-font-size] [class~="text-[0.625rem]"] {
+  font-size: calc(0.625rem * var(--app-font-size-scale));
+}
+
+:root[data-font-size] [class~="text-[11px]"] {
+  font-size: calc(11px * var(--app-font-size-scale));
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -242,6 +282,7 @@
 
   body {
     @apply bg-background text-foreground;
+    font-size: calc(1rem * var(--app-font-size-scale));
     font-feature-settings: "cv11", "ss01";
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -296,7 +337,7 @@ main[data-bot-list-closed] [data-window-titlebar] {
   .note-editor .ProseMirror {
     min-height: 100%;
     outline: none;
-    font-size: 15px;
+    font-size: calc(15px * var(--app-font-size-scale));
     line-height: 1.9;
     color: var(--foreground);
   }

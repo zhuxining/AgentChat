@@ -119,7 +119,9 @@ export function ProviderDetail({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{instance.name || "新接入"}</h2>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {instance.name || "新接入"}
+        </h2>
         <span className="text-muted-foreground text-xs">
           {configured ? "凭据已配置" : "凭据未就绪"}
         </span>

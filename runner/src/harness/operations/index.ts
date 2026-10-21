@@ -3,6 +3,7 @@ import type { Harness } from "@earendil-works/pi-durable";
 
 import type { Configuration } from "../../config/configuration.js";
 import type { createAgentResolver } from "../agent.js";
+import { createBotMemoryOperations } from "./bot-memory.js";
 import { createConversationOperations } from "./conversations.js";
 import { createMutationQueue } from "./mutation-queue.js";
 import { createSubmissionOperations } from "./submissions.js";
@@ -18,12 +19,14 @@ export function createOperations(
   configuration: Configuration,
   models: MutableModels,
   resolver: ReturnType<typeof createAgentResolver>,
+  dataDir: string,
 ) {
   const mutate = createMutationQueue();
   return {
     mutate,
     ...createConversationOperations(harness, configuration, resolver, mutate),
+    ...createBotMemoryOperations(harness, configuration, mutate),
     ...createWorkGoalOperations(harness, mutate),
-    ...createSubmissionOperations(harness, models, resolver, mutate),
+    ...createSubmissionOperations(harness, models, resolver, mutate, dataDir),
   };
 }

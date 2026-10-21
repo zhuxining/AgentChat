@@ -1,6 +1,6 @@
 # AgentChat 架构总览
 
-> **Status**: active。独立后台宿主、Node 24+ 初始化与配置文件已实现；macOS 已完成此前版本的后台和桌面临时目录冒烟。当前 Node 安装回退与 Windows named pipe IPC 尚未完成目标平台验收；多端、Device Core 与 Relay 尚未实现。
+> **Status**: active。独立后台宿主、Node 24+ 初始化、配置文件已实现。macOS 已完成此前版本的后台和桌面临时目录冒烟。当前 Node 安装回退与 Windows named pipe IPC 尚未完成目标平台验收；Device Core 与 Relay 尚未实现。
 
 ## 分工与依赖
 
@@ -57,9 +57,9 @@ runner/src/
 └─ communication/              # 外部解析、路由、stdio 与 native 凭据桥
 ```
 
-`config/` 回答期望配置是什么、哪些有效；不操作 Harness。`harness/` 直接组合 models、Registry、settings、ExecutionEnv 和 Storage，按公开 API 执行、观察工作。`communication/` 将不可信外部输入转换为类型化操作，维护帧大小、关联与连接生命周期，不持有另一份执行状态。
+`config/` 回答期望配置是什么、哪些有效；不操作 Harness。`harness/` 直接组合 models、Registry、settings、ExecutionEnv 和 Storage，按公开 API 执行、观察工作。MCP adapter 在 Runner 生命周期内启动已配置的本机 stdio Server，并把发现的 Tool 注册到同一 Registry。`communication/` 将不可信外部输入转换为类型化操作，维护帧大小、关联与连接生命周期，不持有另一份执行状态。
 
-模型、工作区、能力注册和状态投影都属于 Harness 装配或使用。Extension 相关 Tool、section 和持久状态集中在对应能力模块；不为未来子 Agent、Skill/MCP 建空框架。第一阶段只使用随包能力，不纳入计划模式。
+模型、工作区、能力注册和状态投影都属于 Harness 装配或使用。Extension 相关 Tool、section 和持久状态集中在对应能力模块；不为未来子 Agent 或 Skill 建空框架。随包能力与 MCP 发现能力共用 Bot 显式选择的能力清单，新发现的 Tool 不会自动授予 Bot。当前 MCP 仅支持本机 stdio Server，不接远程或凭据型 Server；没有逐次工具调用审核，也不纳入计划模式。
 
 根 React/Tauri package 与独立 `runner/` workspace 共用 `bun.lock`，Rust 继续由 Cargo 管理。Runner 采用 NodeNext 类型检查，构建产物只包含 `entry.js`，不携带 Node。原生检测器检查 `AGENTCHAT_NODE`、GUI 进程 PATH、平台常见位置和 AgentChat 私有 runtime，验证稳定 Node 24+、`node:sqlite`、版本、架构与绝对路径。首次启动找不到合格 Node 时尝试系统包管理器；失败后从 Node 官方发行源、再从 npmmirror 镜像下载到 AgentChat 数据目录，不修改用户 PATH。根命令聚合构建与测试，详见 [README](../../README.md)。
 

@@ -1,14 +1,16 @@
 # AgentChat 产品蓝图
 
-版本：v0.6
+版本：v0.7
 
-状态：独立后台 Runner、文件配置和 Node 24+ runtime 初始化已实现；macOS 本机后台与桌面临时目录冒烟通过。Node 安装流程尚未在目标平台验收。Windows 命名管道（含当前用户 ACL）与宿主生命周期分支在隔离 Tokio harness 上通过 `x86_64-pc-windows-gnu` 编译；完整 Tauri 应用交叉编译因缺少 MinGW 未完成，Windows 运行验证仍缺。多端与 Relay 尚未实现。
+状态：独立后台 Runner、文件配置、Node 24+ runtime 初始化、Bot 共享记忆首片已接入；记忆的桌面流程尚未验收。macOS 本机后台与桌面临时目录冒烟通过。Node 安装流程尚未在目标平台验收。Windows 命名管道（含当前用户 ACL）与宿主生命周期分支在隔离 Tokio harness 上通过 `x86_64-pc-windows-gnu` 编译；完整 Tauri 应用交叉编译因缺少 MinGW 未完成，Windows 运行验证仍缺。群组、多端与 Relay 尚未实现。
 
 ## 产品定位
 
 AgentChat 是支持持续对话与工作管理的本机 Agent 工作台。用户选择具名 Bot，提交输入、查看执行过程并跟进工作目标。桌面 UI 是控制端，独立后台 Runner 管理配置、工作区与执行状态；关闭或退出 UI 不停止工作。
 
 产品 Conversation 是连续聊天窗口，可以在同一消息流中容纳多个会话。它不默认等同于 pi-durable Conversation，也不决定 Runner 的执行结构。执行术语与产品术语见[术语表](../GLOSSARY.md)，界面结构、自适应规则与状态归属见 [UI 结构](architecture/03-ui-structure.md)。
+
+每个 Bot 只有一个持续对话入口，用户直接发送消息，不提供新建或切换会话操作。首次打开时自动初始化底层执行上下文，之后继续使用已有上下文；初始化失败可以重试，重复请求不得创建额外会话。已有多段历史仍在同一消息流中保留。
 
 未来桌面与 iOS/Android 客户端通过独立 Relay 跨网络同步。手机不运行 Harness；多端通信不改变 Runner 对执行状态的权威归属。
 
@@ -39,11 +41,15 @@ Agent 指令选择内联 `instructions` 或独立 `instructionsFile`，两者排
 
 每个 Bot 自动分配稳定默认工作区，也可以使用外部项目目录。同一 Bot 的多个执行默认共享文件，没有自动目录副本或并发隔离。cwd 不构成路径权限或 OS 沙箱；修改默认目录不隐式移动既有执行。
 
+Bot 记忆按稳定 Bot ID 跨该 Bot 的对话共享，保存在 Runner 的 pi-durable Session 文档中。用户可以查看、编辑和清空；每次保存带 revision 以拒绝过期编辑。每次模型请求最多注入 2,000 个 Unicode 字符，记忆由用户维护且来源与更新时间可见；首版不自动写入或检索历史。
+
 归档或配置缺失禁止从 Bot 新建执行上下文；删除或移动 `bot.json` 不删除历史、不清理工作区、不取消已接纳工作。归档、取消、删除历史与清理各自独立。
 
 ## 输入、目标与多端
 
 Runner 通过库 Conversation.submit 接纳输入，稳定 requestId 用于重试查找 Submission；网络超时不能推断未接纳。Submission、Run、Task 与工作目标完成状态不同，目标完成由用户确认。
+
+附件输入的完整用户消息由 pi-durable 持久化在本机 `runner.sqlite` 的 Conversation Entry 中，包含文本附件正文和图片数据，用于上下文重建与执行恢复；因此附件不能视为只在当前请求中存在。聊天快照另用应用 Entry 元数据投影用户输入及附件文件名/类型，不包含文本文件正文或图片字节。选择附件时，UI 会告知这一持久化行为。
 
 未来客户端明确区分本机待发送、Relay 等待、Runner 已接纳及回答/拒绝状态。网络 Outbox 只负责投递，不替代 pi.inbox。多个执行的调度由 Harness 提供，不自建全局调度器，也不承诺尚未验证的总执行上限。
 
@@ -51,8 +57,8 @@ UI 断线不停止执行；Runner 真正离线时，未来 Relay 可以保存请
 
 ## 扩展与验收范围
 
-第一阶段只装配随 Runner 发布的 Extension 和 Tool。新注册能力不自动授予旧 Bot；精确能力列表、模型和所属 Extension 需要校验。模型通过可配置的供应商接入实例提供，默认可选内置 pi 供应商；不纳入计划模式；Skill/MCP 是未来独立适配，不能等同于 Extension 自动可用。暂不设计任意脚本动态加载、逐 Bot 工具审批、多租户、服务端部署或沙箱。
+Runner 装配随包 Extension，并支持在 `runner.json` 中显式配置本机 stdio MCP Server。MCP 发现的 Tool 只会进入能力选择器，不自动授予已有 Bot；只有 Bot 已选择的 Extension/Tool 才能执行。MCP 首版不支持远程 Server 或凭据型 Server，也没有逐次工具调用审核。模型通过可配置的供应商接入实例提供，默认可选内置 pi 供应商；不纳入计划模式。暂不支持任意脚本插件装载、多租户或服务端部署，也不把 MCP 子进程视为 OS 沙箱。
 
 本机验收需覆盖文件初始化与重载、冲突保护、无效配置修复、指令快照、Bot 缺失、共享工作区、独立后台连接与重复启动排除。生命周期验收需分别验证 UI 退出后继续执行、显式停止、重开恢复以及独立取消；safe replay 和 interrupted 工具遵循库契约。此前 macOS arm64 release `.app`（当时随包 Node）完成了构建和临时目录冒烟；当前版本已移除随包 Node，并实现 Node 24+ 检测和安装回退，但新初始化/安装流程仍需在目标平台验收。真实 Provider、interrupted 工具和其他平台结果仍需独立报告，不从旧测试推导。
 
-多端、外部消息渠道、定时触发、主动推送、多 Runner 调度/迁移、独立长期记忆与自动跨 Bot 协作仍为后续范围。
+多端、外部消息渠道、定时触发、主动推送、多 Runner 调度/迁移、自动记忆整理与检索、自动跨 Bot 协作仍为后续范围。

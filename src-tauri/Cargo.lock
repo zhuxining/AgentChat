@@ -47,6 +47,7 @@ dependencies = [
  "tauri-plugin-websocket",
  "tauri-plugin-window-state",
  "tokio",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

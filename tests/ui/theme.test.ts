@@ -60,7 +60,7 @@ describe("theme settings", () => {
   it("defaults to system and follows live changes in both directions", () => {
     systemDark = true;
     mount();
-    expect((screen.getByRole("combobox", { name: "主题" }) as HTMLSelectElement).value).toBe(
+    expect((screen.getByRole("combobox", { name: "外观" }) as HTMLSelectElement).value).toBe(
       "system",
     );
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -72,24 +72,24 @@ describe("theme settings", () => {
 
   it("applies and remembers explicit choices without following system changes", () => {
     const view = mount();
-    const select = screen.getByRole("combobox", { name: "主题" });
+    const select = screen.getByRole("combobox", { name: "外观" });
     fireEvent.change(select, { target: { value: "dark" } });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     changeSystem(false);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     view.unmount();
     mount();
-    expect((screen.getByRole("combobox", { name: "主题" }) as HTMLSelectElement).value).toBe(
+    expect((screen.getByRole("combobox", { name: "外观" }) as HTMLSelectElement).value).toBe(
       "dark",
     );
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    fireEvent.change(screen.getByRole("combobox", { name: "主题" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "外观" }), {
       target: { value: "light" },
     });
     expect(localStorage.getItem("agentchat.theme")).toBe("light");
     changeSystem(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    fireEvent.change(screen.getByRole("combobox", { name: "主题" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "外观" }), {
       target: { value: "system" },
     });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -101,7 +101,7 @@ describe("theme settings", () => {
     localStorage.setItem("agentchat.theme", "invalid");
     systemDark = true;
     mount();
-    expect((screen.getByRole("combobox", { name: "主题" }) as HTMLSelectElement).value).toBe(
+    expect((screen.getByRole("combobox", { name: "外观" }) as HTMLSelectElement).value).toBe(
       "system",
     );
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -118,7 +118,7 @@ describe("theme settings", () => {
       clear: () => undefined,
     });
     mount();
-    fireEvent.change(screen.getByRole("combobox", { name: "主题" }), { target: { value: "dark" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "外观" }), { target: { value: "dark" } });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(screen.getByRole("alert").textContent).toContain("无法保存偏好");
   });

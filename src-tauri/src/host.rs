@@ -820,6 +820,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
                             conversation_id: 1,
                             text: text.clone(),
                             request_id: format!("request-{index}"),
+                            attachments: Vec::new(),
                         }),
                     },
                 )

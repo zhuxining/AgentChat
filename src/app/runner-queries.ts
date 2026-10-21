@@ -11,9 +11,11 @@ import { useWorkspaceResources } from "@/app/workspace-provider";
 export const runnerKeys = {
   all: ["runner"] as const,
   catalog: ["runner", "catalog"] as const,
+  mcpStatuses: ["runner", "mcp-statuses"] as const,
   lifecycle: ["runner", "lifecycle"] as const,
   snapshots: ["runner", "snapshot"] as const,
   snapshot: (id: number | null) => ["runner", "snapshot", id] as const,
+  botMemory: (botId: string) => ["runner", "bot-memory", botId] as const,
   botSummaries: ["runner", "bot-summaries"] as const,
   botSummariesFor: (botIds: string[], conversationIds: (number | null)[]) =>
     ["runner", "bot-summaries", botIds, conversationIds] as const,
@@ -37,7 +39,7 @@ export function captureRunnerSession(cache: QueryClient) {
   const generation = cache.getQueryData<RunnerLifecycle>(runnerKeys.lifecycle)?.generation ?? 0;
   function assertCurrent() {
     const current = cache.getQueryData<RunnerLifecycle>(runnerKeys.lifecycle) ?? initialLifecycle;
-    if (current.paused || current.generation !== generation)
+    if (current.paused || current.stopped || current.failed || current.generation !== generation)
       throw new Error("Runner 已停止或重新启动，请重新读取后重试。");
   }
   assertCurrent();
@@ -69,6 +71,29 @@ export function useRunnerCatalog() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+}
+
+export function useMcpServerStatuses(enabled: boolean) {
+  const { client } = useWorkspaceResources();
+  const lifecycle = useRunnerLifecycle();
+  const active = enabled && !lifecycle.paused;
+  return useQuery({
+    queryKey: runnerKeys.mcpStatuses,
+    queryFn: async ({ signal }) => {
+      const statuses = await client.mcpStatuses();
+      signal.throwIfAborted();
+      return statuses;
+    },
+    enabled: active,
+    staleTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: active ? 3_000 : false,
+  });
+}
+
+export function updateMcpServerStatuses(cache: QueryClient, initial: InitializeResult) {
+  if (initial.mcpServers) cache.setQueryData(runnerKeys.mcpStatuses, initial.mcpServers);
 }
 
 export function snapshotOptions(client: typeof runnerClient, id: number | null) {

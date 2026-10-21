@@ -202,7 +202,7 @@ it("shows pending input, clears the composer, refreshes replies, and stops polli
   fireEvent.submit(form);
 
   expect(await screen.findByText(/正在发送消息/)).toBeTruthy();
-  expect(runnerClient.submit).toHaveBeenCalledWith(41, "检查任务状态", expect.any(String));
+  expect(runnerClient.submit).toHaveBeenCalledWith(41, "检查任务状态", expect.any(String), []);
 
   submission.resolve({ id: 73 });
   await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
@@ -346,8 +346,8 @@ it("keeps the created Bot when opening its chat fails and retries without creati
   const page = await screen.findByRole("region", { name: "新建 Bot" });
   fireEvent.change(within(page).getByLabelText("Bot 名称"), { target: { value: bot.name } });
   fireEvent.click(within(page).getByRole("button", { name: "创建 Bot" }));
-  expect(await screen.findByText(/Bot 已创建，但打开聊天失败/)).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "开始新对话" }));
+  expect(await screen.findByText(/打开聊天失败/)).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "重试打开聊天" }));
   await waitFor(() =>
     expect(
       (screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).disabled,
@@ -715,7 +715,7 @@ it("settles a submission against its original Bot while preserving another Bot's
   fireEvent.change(other, { target: { value: "写作助手的新草稿" } });
   await act(async () => submission.resolve({ id: 90 }));
   await waitFor(() => expect(other.value).toBe("写作助手的新草稿"));
-  expect(runnerClient.submit).toHaveBeenCalledWith(41, "发给测试助手", expect.any(String));
+  expect(runnerClient.submit).toHaveBeenCalledWith(41, "发给测试助手", expect.any(String), []);
   await openBot();
   expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe("");
 });
@@ -731,6 +731,7 @@ it("retains an uncertain request across navigation and retries with the same req
   fireEvent.change(input, { target: { value: "只接纳一次" } });
   fireEvent.submit(input.closest("form")!);
   await screen.findByText(/接纳结果尚未确认/);
+  fireEvent.change(input, { target: { value: "后续草稿" } });
   const first = vi.mocked(runnerClient.submit).mock.calls[0];
   await openBot(/写作助手/);
   const other = screen.getByRole("textbox", { name: "发送消息" });
@@ -747,7 +748,7 @@ it("retains an uncertain request across navigation and retries with the same req
   expect(vi.mocked(runnerClient.submit).mock.calls[1]).toEqual(first);
   await waitFor(() =>
     expect((screen.getByRole("textbox", { name: "发送消息" }) as HTMLTextAreaElement).value).toBe(
-      "",
+      "后续草稿",
     ),
   );
 });
@@ -869,7 +870,7 @@ it("keeps lifecycle controls pending when switching settings sections", async ()
   let settings = await openRunnerSettings();
   fireEvent.click(within(settings).getByRole("button", { name: "重新启动并连接" }));
   await waitFor(() => expect(runnerClient.restartRunner).toHaveBeenCalledTimes(1));
-  fireEvent.click(within(settings).getByRole("button", { name: "模型与 Provider" }));
+  fireEvent.click(within(settings).getByRole("button", { name: "模型" }));
   fireEvent.click(screen.getByRole("button", { name: "Runner" }));
   settings = screen.getByRole("region", { name: "设置" });
   expect(
@@ -891,7 +892,7 @@ it("keeps lifecycle controls pending when switching settings sections", async ()
   );
 });
 
-it("keeps sending disabled until the accepted submission has finished refreshing", async () => {
+it("keeps the composer editable while an accepted submission finishes refreshing", async () => {
   vi.mocked(runnerClient.initialize).mockResolvedValue(initialState);
   const refresh = deferred<ConversationSnapshot>();
   vi.mocked(runnerClient.snapshot)
@@ -904,10 +905,13 @@ it("keeps sending disabled until the accepted submission has finished refreshing
   fireEvent.change(input, { target: { value: "第一条" } });
   fireEvent.submit(input.closest("form")!);
   await waitFor(() => expect(input.value).toBe(""));
-  expect(input.disabled).toBe(true);
+  expect(input.disabled).toBe(false);
   expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(input, { target: { value: "下一条草稿" } });
   await act(async () => refresh.resolve(initialSnapshot));
   await waitFor(() => expect(input.disabled).toBe(false));
+  expect(input.value).toBe("下一条草稿");
+  expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("does not show a previous Bot's operation error after switching Bots", async () => {
@@ -1071,7 +1075,13 @@ it("keeps the loaded conversation visible when a snapshot refresh fails", async 
   });
   expect(chat.getByText("刷新前已加载的内容")).toBeTruthy();
   expect(chat.queryByRole("status", { name: "正在加载会话" })).toBeNull();
-  expect(await screen.findByRole("alert")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      screen
+        .getAllByRole("alert")
+        .some((alert) => alert.textContent?.includes("Runner 连接已断开")),
+    ).toBe(true),
+  );
 });
 
 it("keeps settings drafts while switching categories but clears them on leaving", async () => {
@@ -1113,7 +1123,7 @@ it("keeps settings drafts while switching categories but clears them on leaving"
 
   fireEvent.click(settings.getByRole("button", { name: "Runner" }));
   expect(await settings.findByRole("region", { name: "后台运行状态" })).toBeTruthy();
-  fireEvent.click(settings.getByRole("button", { name: "模型与 Provider" }));
+  fireEvent.click(settings.getByRole("button", { name: "模型" }));
   expect(await search()).toBeDefined();
   expect((await search()).value).toBe("draft-across-categories");
 
@@ -1121,7 +1131,7 @@ it("keeps settings drafts while switching categories but clears them on leaving"
   await waitFor(() => expect(screen.queryByRole("region", { name: "设置" })).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "应用设置" }));
   const reopened = within(await screen.findByRole("region", { name: "设置" }));
-  fireEvent.click(reopened.getByRole("button", { name: "模型与 Provider" }));
+  fireEvent.click(reopened.getByRole("button", { name: "模型" }));
   fireEvent.click(await reopened.findByRole("button", { name: "编辑 DeepSeek" }));
   expect(((await reopened.findByLabelText("API 密钥")) as HTMLInputElement).value).toBe("");
 });

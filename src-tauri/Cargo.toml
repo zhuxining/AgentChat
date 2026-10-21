@@ -31,6 +31,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
 # ── Tauri Core ──────────────────────────────────────────────────────
 # Tauri 的版本检查要求 Rust crate 与对应的 @tauri-apps/* JS 包处于同一 major.minor。
@@ -74,6 +75,8 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

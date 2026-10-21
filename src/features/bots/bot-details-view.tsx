@@ -4,6 +4,16 @@ import { useState, type ReactNode } from "react";
 
 import type { BotDraft } from "@/app/runner-client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +34,10 @@ import { initializeBotDraft } from "@/features/bots/bot-draft";
 import { BotModelSelect } from "@/features/bots/bot-model-select";
 import { CapabilityFields } from "@/features/bots/capability-fields";
 import { GoalEditor } from "@/features/bots/goal-editor";
+import { useBotMemory } from "@/features/bots/use-bot-memory";
 import { useBotChat } from "@/features/chat/use-bot-chat";
+
+import { BOT_MEMORY_MAX_CHARACTERS } from "../../../contracts/bot-memory";
 
 const thinkingLevels = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -241,6 +254,8 @@ export function BotDetailsView() {
         </DetailsRow>
       </DetailsGroup>
 
+      <BotMemorySection key={bot.id} botId={bot.id} />
+
       {selection.conversationId !== null && (
         <DetailsGroup title="当前对话">
           {snapshot ? (
@@ -323,7 +338,7 @@ export function BotDetailsView() {
               <DialogHeader>
                 <DialogTitle>编辑指令</DialogTitle>
                 <DialogDescription>
-                  指令决定 Bot 的行为方式，保存后只影响新建对话；已有对话需显式应用。
+                  指令决定 Bot 的行为方式，保存后需在对话空闲时显式应用。
                 </DialogDescription>
               </DialogHeader>
               <Textarea
@@ -425,6 +440,222 @@ export function BotDetailsView() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export function BotMemorySection({ botId }: { botId: string }) {
+  const memory = useBotMemory(botId);
+  const [edit, setEdit] = useState<{ content: string; expectedRevision: number } | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [notice, setNotice] = useState("");
+  const characterCount = edit ? Array.from(edit.content).length : 0;
+  const disabled =
+    memory.runnerPaused || memory.isPending || memory.isFetching || memory.busy || !memory.data;
+
+  async function openEditor() {
+    setNotice("");
+    memory.clearOperationError();
+    const result = await memory.refetch();
+    if (result.data) {
+      setEdit({
+        content: result.data.content,
+        expectedRevision: result.data.revision,
+      });
+    }
+  }
+
+  async function reloadEditor() {
+    memory.clearOperationError();
+    const result = await memory.refetch();
+    if (result.data) {
+      setEdit({
+        content: result.data.content,
+        expectedRevision: result.data.revision,
+      });
+    }
+  }
+
+  return (
+    <>
+      <DetailsGroup title="Bot 记忆">
+        <div className="space-y-2 px-3 py-3">
+          {memory.runnerPaused && !memory.data ? (
+            <p className="text-muted-foreground text-xs" role="status">
+              Runner 已暂停，恢复后才能读取 Bot 记忆。
+            </p>
+          ) : memory.isPending ? (
+            <p className="text-muted-foreground text-xs" role="status">
+              正在读取 Bot 记忆…
+            </p>
+          ) : memory.isError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{memory.error.message}</AlertDescription>
+            </Alert>
+          ) : memory.data ? (
+            <>
+              <p className="text-muted-foreground text-xs break-words whitespace-pre-wrap">
+                {memory.data.content || "尚未记录 Bot 记忆。"}
+              </p>
+              <p className="text-muted-foreground text-[11px]">
+                {memory.data.source === "user" && memory.data.updatedAt !== null
+                  ? `用户维护 · 更新于 ${new Date(memory.data.updatedAt).toLocaleString()}`
+                  : "尚未保存"}
+              </p>
+              {memory.runnerPaused && (
+                <p className="text-muted-foreground text-xs" role="status">
+                  Runner 已暂停；当前内容来自本机缓存，恢复后才能读取最新版本或保存修改。
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" disabled={disabled} onClick={openEditor}>
+                  编辑记忆
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive"
+                  disabled={disabled || !memory.data.content}
+                  onClick={() => setConfirmClear(true)}
+                >
+                  清空记忆…
+                </Button>
+              </div>
+            </>
+          ) : null}
+          {(memory.operationError || notice) && (
+            <p
+              role={memory.operationError ? "alert" : "status"}
+              className={memory.operationError ? "text-destructive text-xs" : "text-xs"}
+            >
+              {memory.operationError || notice}
+            </p>
+          )}
+          <p className="text-muted-foreground text-[11px]">
+            记忆会在该 Bot 的每次模型请求中注入，最多 {BOT_MEMORY_MAX_CHARACTERS}{" "}
+            个字符。保存时会遮蔽常见凭据格式，请勿记录密钥或密码。
+          </p>
+        </div>
+      </DetailsGroup>
+
+      <Dialog open={edit !== null} onOpenChange={(open) => !open && setEdit(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>编辑 Bot 记忆</DialogTitle>
+            <DialogDescription>
+              这份记忆会跨该 Bot 的对话共享。内容由你维护，保存后会用于后续模型请求。
+            </DialogDescription>
+          </DialogHeader>
+          {memory.operationError && (
+            <Alert variant="destructive">
+              <AlertDescription>{memory.operationError} 当前草稿仍保留。</AlertDescription>
+            </Alert>
+          )}
+          {memory.isError && (
+            <Alert variant="destructive">
+              <AlertDescription>{memory.error.message}</AlertDescription>
+            </Alert>
+          )}
+          {memory.runnerPaused && (
+            <Alert>
+              <AlertDescription>
+                Runner 已暂停，当前编辑草稿会保留；恢复后才能重新读取或保存。
+              </AlertDescription>
+            </Alert>
+          )}
+          <Textarea
+            aria-label="Bot 记忆内容"
+            className="min-h-48 resize-y"
+            value={edit?.content ?? ""}
+            onChange={(event) =>
+              setEdit((current) =>
+                current ? { ...current, content: event.target.value } : current,
+              )
+            }
+          />
+          <div className="text-muted-foreground flex justify-between text-xs">
+            <span>保存时会遮蔽常见凭据格式。</span>
+            <span aria-live="polite">
+              {characterCount}/{BOT_MEMORY_MAX_CHARACTERS}
+            </span>
+          </div>
+          <DialogFooter>
+            {memory.operationError && (
+              <Button
+                variant="outline"
+                disabled={memory.busy || memory.runnerPaused}
+                onClick={() => void reloadEditor()}
+              >
+                放弃草稿并载入最新版本
+              </Button>
+            )}
+            <Button variant="outline" disabled={memory.busy} onClick={() => setEdit(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={
+                memory.busy ||
+                memory.runnerPaused ||
+                !edit ||
+                characterCount > BOT_MEMORY_MAX_CHARACTERS ||
+                edit.content === memory.data?.content
+              }
+              onClick={async () => {
+                if (!edit) return;
+                const result = await memory.save(edit.expectedRevision, edit.content);
+                if (!result) return;
+                setEdit(null);
+                setNotice(
+                  result.redacted ? "已保存；检测到的常见凭据已自动遮蔽。" : "Bot 记忆已保存。",
+                );
+              }}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={confirmClear}
+        onOpenChange={(open) => {
+          setConfirmClear(open);
+          if (open) {
+            memory.clearOperationError();
+            setNotice("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>清空 Bot 记忆？</AlertDialogTitle>
+            <AlertDialogDescription>
+              后续模型请求将不再收到这份记忆。此操作会更新版本，已打开的旧编辑内容不能覆盖它。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {memory.operationError && (
+            <Alert variant="destructive">
+              <AlertDescription>{memory.operationError}</AlertDescription>
+            </Alert>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={memory.busy}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={memory.busy || memory.runnerPaused || !memory.data}
+              onClick={async () => {
+                if (!memory.data) return;
+                const result = await memory.save(memory.data.revision, "");
+                if (!result) return;
+                setConfirmClear(false);
+                setNotice("Bot 记忆已清空。");
+              }}
+            >
+              清空
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

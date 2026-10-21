@@ -1,11 +1,16 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ActivityIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronLeftIcon,
+  FileTextIcon,
+  ImageIcon,
+  PaperclipIcon,
   PanelRightIcon,
   SparklesIcon,
   SquareIcon,
+  XIcon,
 } from "lucide-react";
 import { Fragment } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -36,6 +41,14 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/features/chat/format-date";
 import { MessageBody } from "@/features/chat/message-content";
@@ -43,6 +56,19 @@ import { useBotChat } from "@/features/chat/use-bot-chat";
 import { useBotTimeline } from "@/features/chat/use-bot-timeline";
 import { useMessageEntrance } from "@/features/chat/use-message-entrance";
 import { useMediaQuery } from "@/hooks/use-media-query";
+
+function formatAttachmentSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KiB`;
+  return `${size} B`;
+}
+
+const tokenFormatter = new Intl.NumberFormat("zh-CN");
+const usdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumSignificantDigits: 4,
+});
 
 // Message ids are only unique inside a library Conversation, so rows are addressed by
 // conversation and message together once several conversations share one transcript.
@@ -91,6 +117,21 @@ export function ChatView({ botId }: { botId: string }) {
     snapshot !== null,
   );
   const hasConversation = selection.conversationId !== null;
+  const hasUsageTokens =
+    (snapshot?.usage?.totalTokens ?? 0) > 0 ||
+    (snapshot?.usage?.inputTokens ?? 0) > 0 ||
+    (snapshot?.usage?.outputTokens ?? 0) > 0 ||
+    (snapshot?.usage?.cacheReadTokens ?? 0) > 0 ||
+    (snapshot?.usage?.cacheWriteTokens ?? 0) > 0;
+  const pendingSubmission = messaging.pendingSubmission;
+  const currentSubmissionPending = pendingSubmission?.conversationId === selection.conversationId;
+  const pendingSubmissionInAnotherConversation =
+    pendingSubmission !== null && !currentSubmissionPending;
+  const composerDisabled =
+    !hasConversation ||
+    connection.composerBusy ||
+    connection.runnerUnavailable ||
+    !connection.ready;
   const executionStatus = snapshot
     ? executing
       ? "执行中"
@@ -129,6 +170,108 @@ export function ChatView({ botId }: { botId: string }) {
             {hasConversation ? ` · ${executionStatus}` : ""}
           </p>
         </div>
+        {hasConversation && snapshot && (
+          <Popover>
+            <PopoverTrigger
+              aria-label="查看会话用量"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-sm transition-colors outline-none focus-visible:ring-3"
+            >
+              <ActivityIcon className="size-4" />
+              <span className="hidden sm:inline">用量</span>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80">
+              <PopoverHeader>
+                <PopoverTitle>会话用量</PopoverTitle>
+                <PopoverDescription>
+                  Conversation 累计模型用量；不同订阅方式的实际账单可能不同。
+                </PopoverDescription>
+              </PopoverHeader>
+              {snapshot.usage && hasUsageTokens ? (
+                <dl className="bg-muted/50 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md p-3 text-sm">
+                  <div>
+                    <dt className="text-muted-foreground text-xs">输入</dt>
+                    <dd className="font-medium tabular-nums">
+                      {tokenFormatter.format(snapshot.usage.inputTokens)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground text-xs">输出</dt>
+                    <dd className="font-medium tabular-nums">
+                      {tokenFormatter.format(snapshot.usage.outputTokens)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground text-xs">缓存读取</dt>
+                    <dd className="font-medium tabular-nums">
+                      {tokenFormatter.format(snapshot.usage.cacheReadTokens)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground text-xs">缓存写入</dt>
+                    <dd className="font-medium tabular-nums">
+                      {tokenFormatter.format(snapshot.usage.cacheWriteTokens)}
+                    </dd>
+                  </div>
+                  <div className="col-span-2 border-t pt-2">
+                    <dt className="text-muted-foreground text-xs">总 Token</dt>
+                    <dd className="font-medium tabular-nums">
+                      {tokenFormatter.format(snapshot.usage.totalTokens)}
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <p className="bg-muted/50 text-muted-foreground rounded-md p-3 text-sm">
+                  暂无可用的模型 Token 数据，可能是尚未产生响应或 Provider 未返回用量。
+                </p>
+              )}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm">
+                <div>
+                  <dt className="text-muted-foreground text-xs">模型调用次数</dt>
+                  <dd>暂不可用</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs">累计模型计价（USD）</dt>
+                  <dd className="font-medium tabular-nums">
+                    {snapshot.usage?.costUsd === null || snapshot.usage?.costUsd === undefined
+                      ? "暂无可信价格数据"
+                      : usdFormatter.format(snapshot.usage.costUsd)}
+                  </dd>
+                </div>
+              </dl>
+              <p className="text-muted-foreground px-1 text-xs">
+                调用次数尚未由运行时准确记录；价格未提供时不按 Token 推算费用。
+              </p>
+              <section aria-label="按模型聚合用量" className="space-y-2 border-t pt-3">
+                <h3 className="text-muted-foreground text-xs font-medium">按模型聚合</h3>
+                {(snapshot.usage?.models ?? []).length > 0 ? (
+                  <ul className="space-y-2">
+                    {(snapshot.usage?.models ?? []).map((model) => (
+                      <li key={model.model} className="bg-muted/50 min-w-0 rounded-md p-2 text-sm">
+                        <div className="flex min-w-0 items-center justify-between gap-3">
+                          <span className="min-w-0 truncate font-medium" title={model.model}>
+                            {model.model}
+                          </span>
+                          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                            {model.costUsd === null
+                              ? "暂无可信价格数据"
+                              : usdFormatter.format(model.costUsd)}
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground mt-1 text-xs tabular-nums">
+                          总 Token {tokenFormatter.format(model.totalTokens)} · 输入{" "}
+                          {tokenFormatter.format(model.inputTokens)} / 输出{" "}
+                          {tokenFormatter.format(model.outputTokens)}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-sm">暂无按模型统计的数据。</p>
+                )}
+              </section>
+            </PopoverContent>
+          </Popover>
+        )}
         {hasLiveTasks && (
           <Button
             disabled={connection.busy}
@@ -147,7 +290,7 @@ export function ChatView({ botId }: { botId: string }) {
           title="详情"
           variant="ghost"
           size="icon-sm"
-          className="aria-expanded:bg-transparent hover:aria-expanded:bg-muted"
+          className="hover:aria-expanded:bg-muted aria-expanded:bg-transparent"
           aria-expanded={isDesktop ? detailsOpen : undefined}
           onClick={() =>
             isDesktop
@@ -192,6 +335,25 @@ export function ChatView({ botId }: { botId: string }) {
             配置密钥
           </Button>
         </div>
+      )}
+      {pendingSubmissionInAnotherConversation && pendingSubmission && (
+        <Alert className="animate-fade-in rounded-none border-x-0 border-t-0">
+          <AlertDescription className="flex items-center justify-between gap-2 px-5 py-3">
+            <span>另一会话有一条接纳结果待确认。请先返回原会话重试，再发送新消息。</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void navigate({
+                  to: "/bots/$botId",
+                  params: { botId: pendingSubmission.botId },
+                })
+              }
+            >
+              返回待确认会话
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
@@ -264,18 +426,30 @@ export function ChatView({ botId }: { botId: string }) {
                           ? `和${selection.activeBot.name}聊聊`
                           : "有什么想一起完成的？"}
                       </EmptyTitle>
-                      <EmptyDescription>使用 DeepSeek，开始一次对话。</EmptyDescription>
+                      <EmptyDescription>
+                        {selection.openingConversation
+                          ? "正在打开聊天…"
+                          : selection.openConversationError
+                            ? `打开聊天失败：${selection.openConversationError.message}`
+                            : "准备好后，直接发送消息开始聊天。"}
+                      </EmptyDescription>
                     </EmptyHeader>
-                    <EmptyContent>
-                      <Button
-                        disabled={
-                          connection.busy || connection.runnerUnavailable || !connection.ready
-                        }
-                        onClick={() => void actions.startConversation(botId)}
-                      >
-                        开始新对话
-                      </Button>
-                    </EmptyContent>
+                    {selection.openingConversation && <Spinner aria-label="正在打开聊天" />}
+                    {selection.openConversationError && (
+                      <EmptyContent>
+                        <Button
+                          disabled={
+                            connection.busy ||
+                            connection.runnerUnavailable ||
+                            !connection.ready ||
+                            selection.openingConversation
+                          }
+                          onClick={() => void selection.retryOpenConversation()}
+                        >
+                          重试打开聊天
+                        </Button>
+                      </EmptyContent>
+                    )}
                   </Empty>
                 </MessageScrollerItem>
               )}
@@ -308,13 +482,19 @@ export function ChatView({ botId }: { botId: string }) {
                     </Empty>
                   </MessageScrollerItem>
                 )}
-              {messaging.pendingSubmission?.conversationId === selection.conversationId && (
+              {currentSubmissionPending && (
                 <MessageScrollerItem messageId="status:pending">
                   <Marker role="status" className="animate-fade-in">
-                    <MarkerIcon>
-                      <Spinner />
-                    </MarkerIcon>
-                    <MarkerContent>正在发送消息…</MarkerContent>
+                    {messaging.submitting && (
+                      <MarkerIcon>
+                        <Spinner />
+                      </MarkerIcon>
+                    )}
+                    <MarkerContent>
+                      {messaging.submitting
+                        ? "正在发送消息…"
+                        : "上一条消息的接纳结果待确认；重试会复用原消息，已修改的输入会在确认后保留。"}
+                    </MarkerContent>
                   </Marker>
                 </MessageScrollerItem>
               )}
@@ -370,16 +550,38 @@ export function ChatView({ botId }: { botId: string }) {
         }}
       >
         <InputGroup className="mx-auto max-w-3xl">
+          {messaging.attachments.length > 0 && (
+            <InputGroupAddon align="block-start" className="flex-wrap">
+              {messaging.attachments.map((attachment) => (
+                <span
+                  key={attachment.id}
+                  className="bg-muted text-muted-foreground inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs"
+                >
+                  {attachment.kind === "image" ? <ImageIcon /> : <FileTextIcon />}
+                  <span className="max-w-52 truncate" title={attachment.name}>
+                    {attachment.name}
+                  </span>
+                  <span className="shrink-0">{formatAttachmentSize(attachment.size)}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除附件 ${attachment.name}`}
+                    disabled={currentSubmissionPending || messaging.submitting}
+                    className="hover:text-foreground focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                    onClick={() => void messaging.removeAttachment(attachment)}
+                  >
+                    <XIcon aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+              <span className="text-muted-foreground basis-full text-xs">
+                发送后，附件内容会保存在本机会话记录中用于恢复上下文；聊天记录只显示文件名和类型。
+              </span>
+            </InputGroupAddon>
+          )}
           <InputGroupTextarea
             aria-label="发送消息"
             className="max-h-40 min-h-16"
-            disabled={
-              !hasConversation ||
-              connection.busy ||
-              connection.runnerUnavailable ||
-              !connection.ready ||
-              messaging.pendingSubmission?.conversationId === selection.conversationId
-            }
+            disabled={composerDisabled}
             placeholder={`发送消息给 ${selection.activeBot?.name ?? "Bot"}`}
             value={messaging.input}
             onChange={(event) => messaging.setInput(event.target.value)}
@@ -392,20 +594,38 @@ export function ChatView({ botId }: { botId: string }) {
           />
           <InputGroupAddon align="block-end" className="pt-1">
             <InputGroupButton
-              aria-label={messaging.pendingSubmission ? "重试" : "发送"}
+              aria-label="添加附件"
+              title={
+                !connection.supportsAttachments
+                  ? "当前 Runner 不支持附件"
+                  : "添加文本或图片附件，最多 3 个"
+              }
+              disabled={
+                composerDisabled ||
+                pendingSubmissionInAnotherConversation ||
+                !connection.supportsAttachments ||
+                messaging.pickingAttachments ||
+                messaging.pendingSubmission !== null ||
+                messaging.attachments.length >= 3
+              }
+              onClick={() => void messaging.pickAttachments()}
+            >
+              {messaging.pickingAttachments ? <Spinner /> : <PaperclipIcon />}
+              <span className="sr-only">添加附件</span>
+            </InputGroupButton>
+            <InputGroupButton
+              aria-label={currentSubmissionPending ? "重试" : "发送"}
               size="icon-sm"
               variant="default"
               type="submit"
               className="ml-auto"
               disabled={
-                !hasConversation ||
-                connection.busy ||
-                connection.runnerUnavailable ||
-                !connection.ready ||
-                !messaging.input.trim() ||
-                messaging.submitting ||
-                (messaging.pendingSubmission !== null &&
-                  messaging.pendingSubmission.conversationId !== selection.conversationId)
+                composerDisabled ||
+                pendingSubmissionInAnotherConversation ||
+                (!currentSubmissionPending &&
+                  !messaging.input.trim() &&
+                  messaging.attachments.length === 0) ||
+                messaging.submitting
               }
             >
               <ArrowUpIcon />

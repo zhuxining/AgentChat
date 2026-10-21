@@ -1,3 +1,4 @@
+import { useMcpServerStatuses } from "@/app/runner-queries";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InfoRow } from "@/components/ui/inspector-section";
@@ -5,8 +6,10 @@ import { ConfigurationEditor } from "@/features/settings/configuration-editor";
 import { SettingsInfoList, SettingsSectionCard } from "@/features/settings/settings-layout";
 import { useRunnerSettings } from "@/features/settings/use-runner-actions";
 
-export function RunnerSettings() {
+export function RunnerSettings({ active }: { active: boolean }) {
   const { catalog, connection, feedback, actions } = useRunnerSettings();
+  const mcpStatuses = useMcpServerStatuses(active);
+  const servers = mcpStatuses.data ?? catalog?.mcpServers;
   const configuration = catalog?.configuration;
   return (
     <div className="space-y-6">
@@ -56,6 +59,55 @@ export function RunnerSettings() {
           </Alert>
         )}
       </SettingsSectionCard>
+      {servers && (
+        <SettingsSectionCard title="MCP Server">
+          <p className="text-muted-foreground text-xs leading-5">
+            在 runner.json 的 mcpServers 中配置本机 stdio Server。发现的工具会出现在 Bot
+            能力选择器中；只有 Bot 已选择的能力会执行。
+          </p>
+          <p className="text-muted-foreground text-xs leading-5">
+            配置的命令会在本机以当前用户身份启动，MCP
+            进程没有独立沙箱隔离；请只配置可信的命令和参数。
+          </p>
+          {servers.length === 0 ? (
+            <p className="text-muted-foreground text-sm">尚未配置 MCP Server。</p>
+          ) : (
+            <SettingsInfoList>
+              {servers.map((server) => (
+                <InfoRow
+                  key={server.id}
+                  label={server.name}
+                  value={
+                    <span>
+                      {connection.runnerUnavailable || mcpStatuses.isError
+                        ? "状态未知"
+                        : server.status === "connecting"
+                          ? "连接中"
+                          : server.status === "connected"
+                            ? "已连接 · " + server.toolCount + " 个工具"
+                            : "连接失败"}
+                      {server.skippedToolCount > 0
+                        ? " · 跳过 " + server.skippedToolCount + " 个不支持的工具"
+                        : ""}
+                    </span>
+                  }
+                />
+              ))}
+            </SettingsInfoList>
+          )}
+          {servers.map(
+            (server) =>
+              server.message && (
+                <p
+                  className="text-muted-foreground text-xs break-words"
+                  key={server.id + ":message"}
+                >
+                  {server.name}：{server.message}
+                </p>
+              ),
+          )}
+        </SettingsSectionCard>
+      )}
       {configuration && (
         <SettingsSectionCard title="配置生效状态">
           <SettingsInfoList>

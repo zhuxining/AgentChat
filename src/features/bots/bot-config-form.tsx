@@ -123,7 +123,7 @@ export function BotConfigForm({
         />
       </FieldGroup>
       <FieldDescription>
-        工作目录只是默认位置，不是文件访问隔离。配置变化只影响新建对话；已有对话需单独应用。
+        工作目录只是默认位置，不是文件访问隔离。保存配置后，需在对话空闲时显式应用。
       </FieldDescription>
       <div className="flex flex-wrap gap-2">
         <Button

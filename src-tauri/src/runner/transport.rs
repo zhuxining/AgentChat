@@ -16,10 +16,106 @@ use crate::runner::protocol::{RunnerReply, RunnerRequest, WireRequest, WireRespo
 
 type Pending = Arc<Mutex<HashMap<u64, mpsc::Sender<Result<Value, String>>>>>;
 
+#[cfg(unix)]
+struct ProcessTree {
+    process_group_id: libc::pid_t,
+}
+
+#[cfg(unix)]
+impl ProcessTree {
+    fn attach(child: &Child) -> std::io::Result<Self> {
+        Ok(Self {
+            process_group_id: child.id() as libc::pid_t,
+        })
+    }
+
+    fn terminate(&self) {
+        // Runner and MCP stdio servers share this dedicated process group.
+        let result = unsafe { libc::kill(-self.process_group_id, libc::SIGKILL) };
+        if result == -1 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("终止 Runner 子进程组失败：{error}");
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+struct ProcessTree {
+    job: std::os::windows::io::OwnedHandle,
+}
+
+#[cfg(windows)]
+impl ProcessTree {
+    fn attach(child: &Child) -> std::io::Result<Self> {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let assigned =
+            configured != 0 && unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } != 0;
+        if !assigned {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(job);
+            }
+            return Err(error);
+        }
+        // SAFETY: this job handle was created above and ownership transfers here.
+        let job = unsafe { OwnedHandle::from_raw_handle(job) };
+        Ok(Self { job })
+    }
+
+    fn terminate(&self) {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        let result = unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) };
+        if result == 0 {
+            eprintln!(
+                "终止 Runner 进程作业失败：{}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+struct ProcessTree;
+
+#[cfg(not(any(unix, windows)))]
+impl ProcessTree {
+    fn attach(_: &Child) -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    fn terminate(&self) {}
+}
+
 #[derive(Clone)]
 pub struct RunnerProcess {
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
+    process_tree: Arc<ProcessTree>,
     pending: Pending,
     next_id: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
@@ -55,11 +151,48 @@ impl RunnerProcess {
         api_key: Option<String>,
         data_dir: &Path,
     ) -> Result<Self, String> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // Give Node and its stdio MCP children a process group the host can reap.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setpgid(0, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
         let mut child = command
             .spawn()
             .map_err(|error| format!("启动 Node Runner 失败：{error}"))?;
-        let stdin = child.stdin.take().ok_or("Runner 标准输入不可用")?;
-        let stdout = child.stdout.take().ok_or("Runner 标准输出不可用")?;
+        let process_tree = match ProcessTree::attach(&child) {
+            Ok(process_tree) => Arc::new(process_tree),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("设置 Runner 子进程边界失败：{error}"));
+            }
+        };
+        let stdin = match child.stdin.take() {
+            Some(stdin) => stdin,
+            None => {
+                process_tree.terminate();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Runner 标准输入不可用".to_owned());
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                process_tree.terminate();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Runner 标准输出不可用".to_owned());
+            }
+        };
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
@@ -70,6 +203,7 @@ impl RunnerProcess {
                 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
             {
                 let error = std::io::Error::last_os_error();
+                process_tree.terminate();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("设置 Runner 输入通道失败：{error}"));
@@ -82,6 +216,7 @@ impl RunnerProcess {
         let closed = Arc::new(AtomicBool::new(false));
         let pending_reader = Arc::clone(&pending);
         let closed_reader = Arc::clone(&closed);
+        let process_tree_reader = Arc::clone(&process_tree);
         let reader = thread::Builder::new()
             .name("agentchat-runner-reader".to_owned())
             .spawn(move || {
@@ -91,9 +226,11 @@ impl RunnerProcess {
                     closed_reader,
                     stdin_reader,
                     credential_dir,
+                    process_tree_reader,
                 )
             });
         if let Err(error) = reader {
+            process_tree.terminate();
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!("启动 Runner 响应读取线程失败：{error}"));
@@ -102,6 +239,7 @@ impl RunnerProcess {
         let process = Self {
             stdin,
             child: Arc::new(Mutex::new(child)),
+            process_tree,
             pending,
             next_id: Arc::new(AtomicU64::new(1)),
             closed,
@@ -200,13 +338,17 @@ impl RunnerProcess {
                     child.try_wait()
                 };
                 match status {
-                    Ok(Some(_)) => return,
+                    Ok(Some(_)) => {
+                        self.process_tree.terminate();
+                        return;
+                    }
                     Ok(None) => thread::sleep(Duration::from_millis(25)),
                     Err(_) => break,
                 }
             }
         }
         eprintln!("Runner 未能正常收尾，终止失效的子进程；下次启动由 Harness 检查恢复状态");
+        self.process_tree.terminate();
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();
@@ -312,6 +454,18 @@ fn native_response(data_dir: &Path, frame: Value) -> Result<Value, String> {
 }
 
 fn read_responses(
+    stdout: impl std::io::Read,
+    pending: Pending,
+    closed: Arc<AtomicBool>,
+    stdin: Arc<Mutex<ChildStdin>>,
+    data_dir: PathBuf,
+    process_tree: Arc<ProcessTree>,
+) {
+    read_response_loop(stdout, pending, closed, stdin, data_dir);
+    process_tree.terminate();
+}
+
+fn read_response_loop(
     stdout: impl std::io::Read,
     pending: Pending,
     closed: Arc<AtomicBool>,
@@ -532,6 +686,7 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
                     conversation_id: 1,
                     text: "delayed".to_owned(),
                     request_id: "delayed".to_owned(),
+                    attachments: Vec::new(),
                 },
                 false,
                 Duration::from_millis(10)

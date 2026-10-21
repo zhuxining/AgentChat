@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+fn unsafe_attachment_name_character(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '/' | '\\'
+                | '\u{061c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+        )
+}
+
 // 请求合同：UI 到 Node Runner 的类型化 IPC 边界。Command 层只依赖这里的类型与
 // validate；子进程传输与帧协议坐在 transport.rs 的 seam 之后。
 
@@ -8,7 +21,16 @@ use serde_json::Value;
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum RunnerRequest {
     Initialize,
+    McpStatuses,
     BotSummaries,
+    ReadBotMemory {
+        bot_id: String,
+    },
+    SaveBotMemory {
+        bot_id: String,
+        expected_revision: u64,
+        content: String,
+    },
     ReloadConfiguration,
     ReadConfiguration {
         path: String,
@@ -64,6 +86,8 @@ pub enum RunnerRequest {
         conversation_id: u64,
         text: String,
         request_id: String,
+        #[serde(default)]
+        attachments: Vec<AttachmentReference>,
     },
     AbortSubmission {
         conversation_id: u64,
@@ -82,6 +106,13 @@ pub enum RunnerRequest {
         api_key: Option<String>,
     },
     Close,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentReference {
+    pub id: String,
+    pub name: String,
 }
 
 impl RunnerRequest {
@@ -135,6 +166,24 @@ impl RunnerRequest {
             Ok(())
         };
         match self {
+            Self::ReadBotMemory { bot_id } | Self::SaveBotMemory { bot_id, .. } => {
+                if bot_id.trim().is_empty() || !valid_text(bot_id, 400) {
+                    return Err("Bot ID 无效".to_owned());
+                }
+                if let Self::SaveBotMemory {
+                    expected_revision,
+                    content,
+                    ..
+                } = self
+                {
+                    if *expected_revision > 9_007_199_254_740_991 {
+                        return Err("Bot 记忆版本无效".to_owned());
+                    }
+                    if content.chars().count() > 2_000 {
+                        return Err("Bot 记忆最多 2000 个字符".to_owned());
+                    }
+                }
+            }
             Self::CreateBot {
                 name,
                 model_id,
@@ -208,12 +257,33 @@ impl RunnerRequest {
                 }
             }
             Self::Submit {
-                text, request_id, ..
+                text,
+                request_id,
+                attachments,
+                ..
             } => {
-                if text.trim().is_empty()
+                let valid_attachments = attachments.len() <= 3
+                    && attachments.iter().all(|attachment| {
+                        uuid::Uuid::parse_str(&attachment.id)
+                            .is_ok_and(|id| id.to_string() == attachment.id)
+                            && !attachment.name.trim().is_empty()
+                            && valid_text(&attachment.name, 1_024)
+                            && !attachment
+                                .name
+                                .chars()
+                                .any(unsafe_attachment_name_character)
+                    })
+                    && attachments
+                        .iter()
+                        .map(|attachment| &attachment.id)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        == attachments.len();
+                if (text.trim().is_empty() && attachments.is_empty())
                     || !valid_text(text, 64_000)
                     || request_id.trim().is_empty()
                     || !valid_text(request_id, 400)
+                    || !valid_attachments
                 {
                     return Err("输入或请求 ID 无效".to_owned());
                 }
@@ -265,6 +335,7 @@ impl RunnerRequest {
                 }
             }
             Self::Initialize
+            | Self::McpStatuses
             | Self::BotSummaries
             | Self::ReloadConfiguration
             | Self::ApplyBotSettings { .. }

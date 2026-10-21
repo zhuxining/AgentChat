@@ -1,5 +1,11 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AgentDoc, type Harness, type Storage } from "@earendil-works/pi-durable";
+import {
+  AgentDoc,
+  UsageDoc,
+  type Harness,
+  type Storage,
+  type UsageState,
+} from "@earendil-works/pi-durable";
 
 import type { Bot } from "../config/configuration.js";
 import type { createAgentResolver } from "./agent.js";
@@ -14,6 +20,72 @@ export type BotListSummary = {
   latestMessage: string;
   executing: boolean;
 };
+
+export type ConversationUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+  models: ModelUsageSummary[];
+};
+
+export type ModelUsageSummary = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+};
+
+function summarizeUsage(state: UsageState | undefined): ConversationUsage {
+  const models = Object.entries(state?.models ?? {})
+    .filter(
+      ([, usage]) =>
+        usage.input + usage.output + usage.cacheRead + usage.cacheWrite + usage.totalTokens > 0,
+    )
+    .map(([model, usage]) => ({
+      model,
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      cacheReadTokens: usage.cacheRead,
+      cacheWriteTokens: usage.cacheWrite,
+      totalTokens: usage.totalTokens,
+      costUsd: usage.cost.total > 0 ? usage.cost.total : null,
+    }))
+    .sort((left, right) => left.model.localeCompare(right.model));
+  const totals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+  };
+  let costUsd = 0;
+  let pricingAvailable = false;
+  let pricingComplete = true;
+  for (const usage of models) {
+    totals.inputTokens += usage.inputTokens;
+    totals.outputTokens += usage.outputTokens;
+    totals.cacheReadTokens += usage.cacheReadTokens;
+    totals.cacheWriteTokens += usage.cacheWriteTokens;
+    totals.totalTokens += usage.totalTokens;
+    if (usage.costUsd !== null) {
+      pricingAvailable = true;
+      costUsd += usage.costUsd;
+    } else {
+      pricingComplete = false;
+    }
+  }
+  return {
+    ...totals,
+    costUsd: pricingAvailable && pricingComplete ? costUsd : null,
+    models,
+  };
+}
 
 const context = BACKGROUND_CONTEXT;
 export function createViews(
@@ -32,6 +104,7 @@ export function createViews(
     try {
       const metadata = await harness.snapshot(ConversationMetadata, conversation.id, context);
       const goal = await harness.snapshot(GoalState, conversation.id, context);
+      const usage = await harness.snapshot(UsageDoc, conversation.id, context);
       const agent = await conversation.agent(context);
       const missing = await configurationErrors(conversation);
       const { messages, hasMoreMessages } = await readProjectedMessages(storage, conversation.id);
@@ -70,6 +143,7 @@ export function createViews(
           },
         },
         goal: goal ?? { description: "", status: "open", updatedAt: 0, completedAt: null },
+        usage: summarizeUsage(usage),
         messages,
         hasMoreMessages,
         activeTasks,

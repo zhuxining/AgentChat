@@ -48,6 +48,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::runner_request,
+            commands::attachments::pick_attachments,
+            commands::attachments::delete_attachments,
             commands::restart_runner,
             commands::start_runner,
             commands::stop_runner,
@@ -56,6 +58,9 @@ pub fn run() {
         ])
         .setup(|app| {
             let data_dir = host::data_dir().map_err(std::io::Error::other)?;
+            if let Err(error) = commands::attachments::cleanup_expired(&data_dir) {
+                eprintln!("清理过期附件失败：{error}");
+            }
             let connection = host::RunnerConnection::new(data_dir, app.path().resource_dir()?);
             app.manage(connection);
             Ok(())

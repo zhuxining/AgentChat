@@ -1,6 +1,7 @@
 import type { MutableModels } from "@earendil-works/pi-ai/models";
 import type { AgentChange, ModelRef, Registry } from "@earendil-works/pi-durable";
 
+import { botMemoryExtension } from "./extensions/bot-memory.js";
 import { workGoalExtension } from "./extensions/work-goal.js";
 
 type AgentConfiguration = {
@@ -25,9 +26,10 @@ export function createAgentResolver(models: MutableModels, registry: Registry) {
       );
     const available = registry.snapshot();
     const extensions = [
+      botMemoryExtension,
       workGoalExtension,
       ...configuration.extensions.map((name) => {
-        if (name === workGoalExtension.name)
+        if (name === workGoalExtension.name || name === botMemoryExtension.name)
           throw new Error("Extension「" + name + "」由 AgentChat 管理");
         const extension = available.installed().find((item) => item.name === name);
         if (!extension) throw new Error("Extension「" + name + "」当前不可用");

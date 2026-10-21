@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { BotMemory, SaveBotMemoryResult } from "../../contracts/bot-memory";
 import type { ProviderRequest, ProviderResponse } from "../../contracts/providers";
 export type { ProviderInstance, ProviderModel, Json } from "../../contracts/providers";
 
@@ -42,16 +43,49 @@ export type BotListSummary = {
   latestMessage: string;
   executing: boolean;
 };
+export type AttachmentReference = { id: string; name: string };
+export type DraftAttachment = AttachmentReference & {
+  size: number;
+  mimeType: string;
+  kind: "text" | "image";
+};
+export type SubmissionResult = { id: number } | { rejected: true; message: string };
 export type RunnerCapabilities = {
   extensions: string[];
-  tools: { name: string; extension: string }[];
+  tools: { name: string; extension: string; displayName?: string }[];
 };
-export type QueryCapabilities = { botSummaries: boolean };
+export type McpServerStatus = {
+  id: string;
+  name: string;
+  status: "connecting" | "connected" | "failed";
+  toolCount: number;
+  skippedToolCount: number;
+  message?: string;
+};
+export type QueryCapabilities = { botSummaries: boolean; attachments?: boolean };
 export type ProjectedMessage = {
   id: number;
   role: "user" | "assistant" | "tool" | "system";
   text: string;
   truncated: boolean;
+};
+export type ConversationUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
+  models: ModelUsageSummary[];
+};
+export type ModelUsageSummary = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number | null;
 };
 export type ConversationSnapshot = {
   conversation: {
@@ -74,6 +108,8 @@ export type ConversationSnapshot = {
     updatedAt: number;
     completedAt: number | null;
   };
+  /** Absent when an older background Runner is serving this request. */
+  usage?: ConversationUsage;
   messages: ProjectedMessage[];
   hasMoreMessages: boolean;
   activeTasks: {
@@ -105,6 +141,8 @@ export type InitializeResult = {
   conversations: ConversationSummary[];
   capabilities: RunnerCapabilities;
   queryCapabilities?: QueryCapabilities;
+  /** Absent when an older background Runner is serving this request. */
+  mcpServers?: McpServerStatus[];
   // Absent while an older background Runner is still serving; the UI falls back to the
   // Bot's current provider and model in that case.
   providers?: ProviderOption[];
@@ -116,17 +154,26 @@ export type InitializeResult = {
 export type RunnerRequest =
   | { op: "providerRequest"; request: ProviderRequest }
   | { op: "initialize" }
+  | { op: "mcpStatuses" }
   | { op: "reloadConfiguration" }
   | { op: "readConfiguration"; path: string }
   | { op: "saveConfiguration"; path: string; version: string; content: string }
   | ({ op: "createBot" } & BotDraft)
   | ({ op: "updateBot"; botId: string; configVersion: string } & BotDraft)
   | { op: "archiveBot"; botId: string; configVersion: string }
+  | { op: "readBotMemory"; botId: string }
+  | { op: "saveBotMemory"; botId: string; expectedRevision: number; content: string }
   | { op: "createConversation"; botId: string; cwd: string; goal: string }
   | { op: "applyBotSettings"; conversationId: number }
   | { op: "saveGoal"; conversationId: number; description: string }
   | { op: "setGoalStatus"; conversationId: number; status: "open" | "completed" }
-  | { op: "submit"; conversationId: number; text: string; requestId: string }
+  | {
+      op: "submit";
+      conversationId: number;
+      text: string;
+      requestId: string;
+      attachments: AttachmentReference[];
+    }
   | { op: "abortSubmission"; conversationId: number; submissionId: number }
   | { op: "snapshot"; conversationId: number }
   | { op: "botSummaries" }
@@ -145,6 +192,7 @@ export const runnerClient = {
   runtimeStatus: () => invoke<RuntimeStatus>("runtime_status"),
   installRuntime: () => invoke<RuntimeStatus>("install_runtime"),
   initialize: () => request<InitializeResult>({ op: "initialize" }),
+  mcpStatuses: () => request<McpServerStatus[]>({ op: "mcpStatuses" }),
   reloadConfiguration: () => request<InitializeResult>({ op: "reloadConfiguration" }),
   readConfiguration: (path: string) =>
     request<ConfigurationFile>({ op: "readConfiguration", path }),
@@ -155,6 +203,9 @@ export const runnerClient = {
     request<{ bot: Bot; bots: Bot[] }>({ op: "updateBot", botId, ...input, configVersion }),
   archiveBot: (botId: string, configVersion: string) =>
     request<{ bots: Bot[] }>({ op: "archiveBot", botId, configVersion }),
+  readBotMemory: (botId: string) => request<BotMemory>({ op: "readBotMemory", botId }),
+  saveBotMemory: (botId: string, expectedRevision: number, content: string) =>
+    request<SaveBotMemoryResult>({ op: "saveBotMemory", botId, expectedRevision, content }),
   createConversation: (botId: string, cwd: string, goal: string) =>
     request<ConversationSummary>({ op: "createConversation", botId, cwd, goal }),
   applyBotSettings: (conversationId: number) =>
@@ -163,8 +214,15 @@ export const runnerClient = {
     request<ConversationSnapshot["goal"]>({ op: "saveGoal", conversationId, description }),
   setGoalStatus: (conversationId: number, status: "open" | "completed") =>
     request<ConversationSnapshot["goal"]>({ op: "setGoalStatus", conversationId, status }),
-  submit: (conversationId: number, text: string, requestId: string) =>
-    request<{ id: number }>({ op: "submit", conversationId, text, requestId }),
+  pickAttachments: (remaining: number) =>
+    invoke<DraftAttachment[]>("pick_attachments", { remaining }),
+  deleteAttachments: (ids: string[]) => invoke<void>("delete_attachments", { ids }),
+  submit: (
+    conversationId: number,
+    text: string,
+    requestId: string,
+    attachments: AttachmentReference[],
+  ) => request<SubmissionResult>({ op: "submit", conversationId, text, requestId, attachments }),
   abortSubmission: (conversationId: number, submissionId: number) =>
     request<{ status: "aborted" | "already_placed" | "settled" | "not_found" }>({
       op: "abortSubmission",

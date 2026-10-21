@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { attachmentInputEntryKind } from "../src/harness/attachments.js";
 import { projectMessages, readProjectedMessages } from "../src/harness/messages.js";
 
 const context = BACKGROUND_CONTEXT;
@@ -26,6 +27,58 @@ async function reference(conversation: Conversation) {
 }
 
 describe("bounded message projection", () => {
+  it("shows attachment labels while hiding new and legacy attachment bodies", async () => {
+    const storage = new MemoryStorage();
+    const harness = await Harness.open(
+      storage,
+      { models: createModels(), registry: createRegistry() },
+      context,
+    );
+    try {
+      const conversation = await harness.createConversation(
+        { ownership: { kind: "ownerless" } },
+        context,
+      );
+      await harness.commit(async (tx) => {
+        await tx.appendEntry(conversation.id, {
+          kind: attachmentInputEntryKind,
+          data: {
+            textLength: "请检查".length,
+            attachments: [{ name: "secret.md", type: "text" }],
+          },
+          model: [
+            {
+              role: "user",
+              content: "请检查\n\n[附件文本：secret.md]\n私密正文\n[/附件文本]",
+              timestamp: 1,
+            },
+          ],
+        });
+        await tx.appendEntry(conversation.id, {
+          kind: "pi.user",
+          model: [
+            {
+              role: "user",
+              content: "旧版消息\n\n[附件文本：legacy.md]\n旧版私密正文\n[/附件文本]",
+              timestamp: 2,
+            },
+          ],
+        });
+      }, context);
+
+      const projected = await reference(conversation);
+
+      expect(projected.messages.map(({ text }) => text)).toEqual([
+        "请检查\n\n[文本附件：secret.md]",
+        "旧版消息\n[附件正文已隐藏]",
+      ]);
+      expect(JSON.stringify(projected)).not.toContain("私密正文");
+      expect(JSON.stringify(projected)).not.toContain("旧版私密正文");
+    } finally {
+      await harness.close(context);
+    }
+  });
+
   it("matches the full view while reading at most the tail and 51 entries for a long transcript", async () => {
     const storage = new MemoryStorage();
     const harness = await Harness.open(

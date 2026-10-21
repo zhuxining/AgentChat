@@ -17,11 +17,19 @@ export type RunnerConfiguration = {
   name: string;
   workspace: { root: string };
   providers: Record<string, { type: "deepseek"; credentialRef: string } | ProviderInstance>;
+  mcpServers: McpServerConfiguration[];
   botDefaults: Omit<AgentConfiguration, "instructionsFile"> & { instructions: string };
   harness: Pick<
     HarnessSettings,
     "toolExecution" | "followUpMode" | "steeringMode" | "stream" | "retry" | "compaction"
   >;
+};
+export type McpServerConfiguration = {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  cwd?: string;
 };
 export type BotConfiguration = {
   schemaVersion: 1;
@@ -202,7 +210,7 @@ export function parseJSON(content: string): unknown {
 export function parseRunner(value: unknown): RunnerConfiguration {
   const input = object(
     value,
-    ["schemaVersion", "name", "workspace", "providers", "botDefaults", "harness"],
+    ["schemaVersion", "name", "workspace", "providers", "mcpServers", "botDefaults", "harness"],
     "runner",
   );
   if (input.schemaVersion !== 1 && input.schemaVersion !== 2) invalid("schemaVersion");
@@ -239,14 +247,39 @@ export function parseRunner(value: unknown): RunnerConfiguration {
   }
   const defaults = agent(input.botDefaults, true);
   if (defaults.instructions === undefined) invalid("botDefaults.instructions");
+  const mcpServers = parseMcpServers(input.mcpServers);
   return {
     schemaVersion: input.schemaVersion,
     name: text(input.name, "name", 80),
     workspace: { root: text(workspace.root, "workspace.root") },
     providers,
+    mcpServers,
     botDefaults: { ...defaults, instructions: defaults.instructions },
     harness: input.harness === undefined ? {} : settings(input.harness),
   };
+}
+
+function parseMcpServers(value: unknown): McpServerConfiguration[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 8) invalid("mcpServers");
+  const servers = value.map((item) => {
+    const input = object(item, ["id", "name", "command", "args", "cwd"], "mcpServers[]");
+    const id = text(input.id, "mcpServers[].id", 48);
+    if (!/^[a-z][a-z0-9-]{0,47}$/.test(id)) invalid("mcpServers[].id");
+    if (input.args !== undefined && (!Array.isArray(input.args) || input.args.length > 100))
+      invalid("mcpServers[].args");
+    const args = (input.args ?? []).map((item) => text(item, "mcpServers[].args[]", 2048, true));
+    return {
+      id,
+      name: text(input.name, "mcpServers[].name", 80),
+      command: text(input.command, "mcpServers[].command", 512),
+      args,
+      ...(input.cwd === undefined ? {} : { cwd: text(input.cwd, "mcpServers[].cwd", 4096) }),
+    };
+  });
+  if (new Set(servers.map((server) => server.id)).size !== servers.length)
+    invalid("mcpServers[].id");
+  return servers;
 }
 export function parseBot(value: unknown): BotConfiguration {
   const input = object(value, ["schemaVersion", "name", "archived", "workspace", "agent"], "bot");
@@ -266,6 +299,7 @@ export function defaultRunnerConfiguration(): RunnerConfiguration {
     name: "本机 Runner",
     workspace: { root: "workspaces" },
     providers: { deepseek: { type: "deepseek", credentialRef: "provider/deepseek" } },
+    mcpServers: [],
     botDefaults: {
       model: { provider: "deepseek", modelId: "deepseek-chat" },
       thinkingLevel: "medium",

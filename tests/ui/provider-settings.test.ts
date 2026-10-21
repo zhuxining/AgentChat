@@ -151,6 +151,8 @@ it("offers model testing but no delete action for built-in connections", async (
   delete instance.custom;
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
+  await screen.findByRole("button", { name: "编辑模型 model-a" });
+  fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
   expect(await screen.findByLabelText("测试模型")).toBeTruthy();
   expect(screen.getByRole("button", { name: "测试已保存配置" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "删除连接" })).toBeNull();
@@ -180,13 +182,11 @@ it("keeps every saved connection visible and opens its matching configuration", 
     expect((screen.getByLabelText("提供商") as HTMLSelectElement).value).toBe("deepseek"),
   );
   expect(await screen.findByLabelText("API 密钥")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "返回已连接列表" }));
   fireEvent.click(await screen.findByRole("button", { name: "编辑 公司网关" }));
   expect(((await screen.findByLabelText("接入名称")) as HTMLInputElement).value).toBe("公司网关");
   expect(screen.getByRole("button", { name: "自定义模型 API" }).getAttribute("aria-pressed")).toBe(
     "true",
   );
-  fireEvent.click(screen.getByRole("button", { name: "返回已连接列表" }));
   expect(
     within(screen.getByRole("list", { name: "已连接供应商" })).getAllByRole("button", {
       name: /^编辑 /,
@@ -219,7 +219,7 @@ it("keeps built-in configuration focused on credentials and model selection", as
   expect(await screen.findByLabelText("API 密钥")).toBeTruthy();
   expect(screen.queryByLabelText("接入稳定 ID")).toBeNull();
   expect(screen.queryByLabelText("供应商参数 JSON")).toBeNull();
-  expect(screen.queryByRole("button", { name: "编辑模型 model-a" })).toBeNull();
+  expect(screen.getByRole("button", { name: "编辑模型 model-a" })).toBeTruthy();
   expect(screen.queryByLabelText("API 地址")).toBeNull();
   fireEvent.change(screen.getByLabelText("API 密钥"), { target: { value: "new-secret" } });
   fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -412,6 +412,8 @@ it("shares form and JSON model edits, preserves inheritance, and restores built-
   await openInstance();
   fireEvent.click(screen.getByRole("button", { name: "模型" }));
   fireEvent.click(screen.getByRole("button", { name: "编辑模型 model-a" }));
+  fireEvent.click(screen.getByRole("button", { name: "模型选项" }));
+  fireEvent.click(screen.getByRole("button", { name: /高级 JSON/ }));
   expect((screen.getByLabelText("模型高级 JSON") as HTMLTextAreaElement).value).toBe("{}");
   fireEvent.change(screen.getByLabelText("上下文上限"), { target: { value: "32000" } });
   expect(JSON.parse((screen.getByLabelText("模型高级 JSON") as HTMLTextAreaElement).value)).toEqual(
@@ -421,7 +423,7 @@ it("shares form and JSON model edits, preserves inheritance, and restores built-
     target: { value: '{"contextWindow":16000,"compat":{"supportsStore":false}}' },
   });
   expect((screen.getByLabelText("上下文上限") as HTMLInputElement).value).toBe("16000");
-  fireEvent.click(screen.getByRole("button", { name: "应用模型草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "应用" }));
   fireEvent.click(screen.getByRole("button", { name: "保存接入" }));
   await waitFor(() =>
     expect(instance.modelOverrides).toEqual({
@@ -437,6 +439,7 @@ it("shares form and JSON model edits, preserves inheritance, and restores built-
 it("marks tests stale when editing and requires confirmation before restarting a busy backend", async () => {
   mount();
   await openInstance();
+  fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
   fireEvent.click(screen.getByRole("button", { name: "测试已保存配置" }));
   expect(await screen.findByText("连接测试成功")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("接入名称"), { target: { value: "网关新名称" } });
@@ -516,6 +519,8 @@ it("creates custom models with the instance identity and supplier API protocol",
   await openInstance();
   fireEvent.click(screen.getByRole("button", { name: "模型" }));
   fireEvent.click(screen.getByRole("button", { name: "添加自定义模型" }));
+  fireEvent.click(screen.getByRole("button", { name: "模型选项" }));
+  fireEvent.click(screen.getByRole("button", { name: /高级 JSON/ }));
   fireEvent.change(screen.getByLabelText("自定义模型 ID"), { target: { value: "custom-a" } });
   fireEvent.change(screen.getByLabelText("模型名称"), { target: { value: "定制模型" } });
   expect((screen.getByLabelText("模型 API 协议") as HTMLSelectElement).value).toBe(
@@ -527,7 +532,7 @@ it("creates custom models with the instance identity and supplier API protocol",
     api: "openai-completions",
     baseUrl: "https://api.example.test",
   });
-  fireEvent.click(screen.getByRole("button", { name: "应用模型草稿" }));
+  fireEvent.click(screen.getByRole("button", { name: "应用" }));
   fireEvent.click(screen.getByRole("button", { name: "保存接入" }));
   await waitFor(() =>
     expect(instance.customModels[0]).toMatchObject({
@@ -561,12 +566,15 @@ it("restores an inherited field and deeply merges the original catalog defaults"
   await openInstance();
   fireEvent.click(screen.getByRole("button", { name: "模型" }));
   fireEvent.click(screen.getByRole("button", { name: "编辑模型 model-a" }));
+  fireEvent.click(screen.getByRole("button", { name: "模型选项" }));
   expect((screen.getByLabelText("上下文上限") as HTMLInputElement).value).toBe("32000");
   fireEvent.click(screen.getByRole("button", { name: "恢复上下文上限默认值" }));
   expect((screen.getByLabelText("上下文上限") as HTMLInputElement).value).toBe("64000");
+  fireEvent.click(screen.getByRole("button", { name: /高级 JSON/ }));
   fireEvent.change(screen.getByLabelText("模型高级 JSON"), {
     target: { value: '{"cost":{"input":2}}' },
   });
+  fireEvent.click(screen.getByRole("button", { name: "查看最终有效配置（未解析凭据）" }));
   const preview = screen.getByText(/"cacheRead": 0/, { selector: "pre" });
   expect(preview.textContent).toContain('"input": 2');
   expect(preview.textContent).toContain('"output": 0');

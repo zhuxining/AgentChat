@@ -79,7 +79,8 @@ export function CapabilityFields({
                 }
               />
               <FieldLabel htmlFor={id} className="text-xs font-normal">
-                {tool.name} <span className="text-muted-foreground">({tool.extension})</span>
+                {tool.displayName ?? tool.name}{" "}
+                <span className="text-muted-foreground">({tool.extension})</span>
               </FieldLabel>
             </Field>
           );

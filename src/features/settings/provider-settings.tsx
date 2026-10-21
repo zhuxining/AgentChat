@@ -342,7 +342,9 @@ export function ProviderSettings() {
               onTest={(test) => setTests((previous) => ({ ...previous, [test.instanceId]: test }))}
             />
           ) : (
-            <p role="status" className="text-muted-foreground text-sm">尚未选择提供商。</p>
+            <p role="status" className="text-muted-foreground text-sm">
+              尚未选择提供商。
+            </p>
           )}
           {!instance && (
             <div className="flex justify-end">

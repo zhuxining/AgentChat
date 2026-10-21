@@ -1,5 +1,7 @@
 import type { Bot } from "../config/configuration.js";
+import { isSafeAttachmentName, type AttachmentReference } from "../harness/attachments.js";
 import type { Runner } from "../harness/open.js";
+import { SubmissionRejectedError } from "../harness/submission-errors.js";
 
 function text(input: Record<string, unknown>, name: string, max = 8_000, empty = false): string {
   const value = input[name];
@@ -25,6 +27,31 @@ function names(input: Record<string, unknown>, name: string): string[] {
   }
   const result: string[] = value;
   if (new Set(result).size !== result.length) throw new Error("字段 " + name + " 不能重复");
+  return result;
+}
+function attachments(input: Record<string, unknown>): AttachmentReference[] {
+  const value = input.attachments ?? [];
+  if (
+    !Array.isArray(value) ||
+    value.length > 3 ||
+    value.some(
+      (item) =>
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        typeof item.id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.id) ||
+        typeof item.name !== "string" ||
+        !item.name.trim() ||
+        !isSafeAttachmentName(item.name),
+    )
+  ) {
+    throw new Error("附件引用无效");
+  }
+  const result = value as AttachmentReference[];
+  if (new Set(result.map(({ id: attachmentId }) => attachmentId)).size !== result.length) {
+    throw new Error("附件引用不能重复");
+  }
   return result;
 }
 function botDraft(input: Record<string, unknown>): Partial<Bot> & { name: string } {
@@ -66,6 +93,8 @@ export function createRequestHandler(runner: Runner) {
         return runner.providerRequest(input.request);
       case "initialize":
         return runner.initialize();
+      case "mcpStatuses":
+        return runner.mcpStatuses();
       case "botSummaries":
         return runner.botSummaries();
       case "createBot":
@@ -78,6 +107,23 @@ export function createRequestHandler(runner: Runner) {
         );
       case "archiveBot":
         return runner.archiveBot(text(input, "botId", 100), text(input, "configVersion", 128));
+      case "readBotMemory":
+        return runner.readBotMemory(text(input, "botId", 100));
+      case "saveBotMemory": {
+        const expectedRevision = input.expectedRevision;
+        if (
+          typeof expectedRevision !== "number" ||
+          !Number.isSafeInteger(expectedRevision) ||
+          expectedRevision < 0
+        ) {
+          throw new Error("字段 expectedRevision 无效");
+        }
+        return runner.saveBotMemory(
+          text(input, "botId", 100),
+          expectedRevision,
+          text(input, "content", 4_000, true),
+        );
+      }
       case "reloadConfiguration":
         return runner.reloadConfiguration();
       case "readConfiguration":
@@ -106,12 +152,39 @@ export function createRequestHandler(runner: Runner) {
         if (status !== "open" && status !== "completed") throw new Error("工作目标状态无效");
         return runner.setGoalStatus(id(input, "conversationId"), status);
       }
-      case "submit":
-        return runner.submit({
-          conversationId: id(input, "conversationId"),
-          text: text(input, "text", 16_000),
-          requestId: text(input, "requestId", 100),
-        });
+      case "submit": {
+        let submission: {
+          conversationId: number;
+          text: string;
+          requestId: string;
+          attachments: AttachmentReference[];
+        };
+        try {
+          const fileAttachments = attachments(input);
+          const message = text(input, "text", 16_000, true);
+          if (!message.trim() && fileAttachments.length === 0)
+            throw new Error("请输入消息或添加附件");
+          submission = {
+            conversationId: id(input, "conversationId"),
+            text: message,
+            requestId: text(input, "requestId", 100),
+            attachments: fileAttachments,
+          };
+        } catch (error) {
+          return {
+            rejected: true,
+            message: error instanceof Error ? error.message.slice(0, 500) : "提交内容无效",
+          };
+        }
+        try {
+          return await runner.submit(submission);
+        } catch (error) {
+          if (error instanceof SubmissionRejectedError) {
+            return { rejected: true, message: error.message };
+          }
+          throw error;
+        }
+      }
       case "abortSubmission":
         return runner.abortSubmission(id(input, "conversationId"), id(input, "submissionId"));
       case "abort":

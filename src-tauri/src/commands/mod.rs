@@ -2,6 +2,8 @@ use crate::host::RunnerConnection;
 use crate::runner::{RunnerReply, RunnerRequest};
 use tauri::State;
 
+pub mod attachments;
+
 #[tauri::command]
 pub fn runtime_status() -> crate::runtime::RuntimeStatus {
     crate::runtime::detect()

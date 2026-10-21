@@ -15,7 +15,9 @@ import { ProviderState } from "../providers/state.js";
 import { createAgentResolver } from "./agent.js";
 import { createAuthStatus } from "./auth-status.js";
 import { executionEnvironment } from "./environment.js";
+import { botMemoryExtension } from "./extensions/bot-memory.js";
 import { workGoalExtension } from "./extensions/work-goal.js";
+import { createMcpServerManager, mcpToolPrefix } from "./mcp.js";
 import { prepareProvider } from "./models.js";
 import { createOperations } from "./operations/index.js";
 import { createRunnerRegistry } from "./registry.js";
@@ -59,6 +61,8 @@ export async function openRunner({
   };
   let models = providedModels ?? createModels();
   const registry = createRunnerRegistry();
+  const configuredMcpIds = new Set<string>();
+  const mcp = createMcpServerManager(registry, dataDir);
   const catalog = createModels();
   for (const item of providedModels?.getProviders() ?? builtins()) catalog.setProvider(item);
   const catalogResolver = createAgentResolver(catalog, registry);
@@ -67,10 +71,20 @@ export async function openRunner({
   const configuration = await Configuration.open(
     dataDir,
     (choices) => {
-      catalogResolver.resolve(choices);
+      const mcpExtensions = new Set([...configuredMcpIds].map((id) => `mcp-${id}`));
+      const mcpToolPrefixes = [...configuredMcpIds].map(mcpToolPrefix);
+      catalogResolver.resolve({
+        ...choices,
+        extensions: choices.extensions.filter((name) => !mcpExtensions.has(name)),
+        tools: choices.tools.filter(
+          (name) => !mcpToolPrefixes.some((prefix) => name.startsWith(prefix)),
+        ),
+      });
     },
     (runner) => {
       currentSchema = runner.schemaVersion;
+      configuredMcpIds.clear();
+      for (const server of runner.mcpServers) configuredMcpIds.add(server.id);
       if (providedModels) return;
       const desired = createInstanceRuntime(instancesOf(runner), native, {
         legacyCredential,
@@ -163,7 +177,7 @@ export async function openRunner({
       context,
     );
     openedProviders = JSON.stringify(configuration.runner?.providers);
-    const operations = createOperations(harness, configuration, models, resolver);
+    const operations = createOperations(harness, configuration, models, resolver, dataDir);
     const views = createViews(harness, storage, resolver, isConfigured);
     harness.resume();
     return { harness, storage, operations, ...views };
@@ -265,21 +279,26 @@ export async function openRunner({
     providerState,
   );
   configuration.beforeRunnerSave = (next) => providers.validateChange(next);
+  await mcp.sync(configuration.runner?.mcpServers ?? []);
+  await configuration.reload();
   await ensureStarted();
   async function initialize() {
     const installed = registry.snapshot();
     return {
       bots: configuration.bots(),
       conversations: active ? await active.operations.conversations() : [],
-      queryCapabilities: { botSummaries: true },
+      mcpServers: mcp.statuses(),
+      queryCapabilities: { botSummaries: true, attachments: true },
       capabilities: {
         extensions: installed
           .installed()
           .map((item) => item.name)
-          .filter((name) => name !== workGoalExtension.name),
-        tools: installed
-          .tools()
-          .map(({ extension, tool }) => ({ name: tool.name, extension: extension.name })),
+          .filter((name) => name !== workGoalExtension.name && name !== botMemoryExtension.name),
+        tools: installed.tools().map(({ extension, tool }) => ({
+          name: tool.name,
+          extension: extension.name,
+          ...(mcp.displayName(tool.name) ? { displayName: mcp.displayName(tool.name) } : {}),
+        })),
       },
       botDefaults: configuration.runner
         ? {
@@ -320,6 +339,7 @@ export async function openRunner({
   }
   return {
     initialize,
+    mcpStatuses: () => mcp.statuses(),
     // Config mutations serialize with other Runner configuration changes. Status, test and
     // OAuth interaction stay direct so a running model test cannot block login polling/cancel.
     providerRequest: (request: unknown) => {
@@ -355,8 +375,13 @@ export async function openRunner({
         await configuration.archiveBot(id, version);
         return { bots: configuration.bots() };
       }),
+    readBotMemory: (botId: string) => execution().operations.readBotMemory(botId),
+    saveBotMemory: (botId: string, expectedRevision: number, content: string) =>
+      execution().operations.saveBotMemory(botId, expectedRevision, content),
     reloadConfiguration: () =>
       configure(async () => {
+        await configuration.reload();
+        await mcp.sync(configuration.runner?.mcpServers ?? []);
         await configuration.reload();
         authRevision++;
         await ensureStarted();
@@ -366,6 +391,8 @@ export async function openRunner({
     saveConfiguration: (path: string, version: string, content: string) =>
       configure(async () => {
         await configuration.saveConfiguration(path, version, content);
+        await mcp.sync(configuration.runner?.mcpServers ?? []);
+        await configuration.reload();
         authRevision++;
         await ensureStarted();
         return { saved: true };
@@ -376,8 +403,12 @@ export async function openRunner({
     saveGoal: (id: number, description: string) => execution().operations.saveGoal(id, description),
     setGoalStatus: (id: number, status: "open" | "completed") =>
       execution().operations.setGoalStatus(id, status),
-    submit: (input: { conversationId: number; text: string; requestId: string }) =>
-      execution().operations.submit(input),
+    submit: (input: {
+      conversationId: number;
+      text: string;
+      requestId: string;
+      attachments?: { id: string; name: string }[];
+    }) => execution().operations.submit(input),
     abortSubmission: (id: number, submissionId: number) =>
       execution().operations.abortSubmission(id, submissionId),
     abort: (id: number) => execution().operations.abort(id),
@@ -400,6 +431,7 @@ export async function openRunner({
         await current.operations.mutate(() => current.harness.close(context));
         active = undefined;
       }
+      await mcp.close();
       return { closed: true };
     },
   };

@@ -10,7 +10,13 @@ export function useBotChat() {
   const query = useRunnerCatalog();
   const selection = useBotSelection(botId);
   const lifecycle = useRunnerLifecycle();
-  const chat = useChatActions(botId, selection.conversationId, selection.snapshot);
+  const supportsAttachments = query.data?.queryCapabilities?.attachments === true;
+  const chat = useChatActions(
+    botId,
+    selection.conversationId,
+    selection.snapshot,
+    supportsAttachments,
+  );
   const bots = useBotActions();
   const runner = useRunnerActions();
   const snapshot = selection.snapshot;
@@ -27,10 +33,17 @@ export function useBotChat() {
     connection: {
       loading: query.isPending,
       busy: chat.busy || bots.busy || runner.busy,
-      runnerUnavailable: lifecycle.paused || query.isError || Boolean(selection.snapshotError),
+      composerBusy: chat.operationBusy || bots.busy || runner.busy,
+      runnerUnavailable:
+        lifecycle.paused ||
+        lifecycle.stopped ||
+        lifecycle.failed ||
+        query.isError ||
+        Boolean(selection.snapshotError),
       ready: query.data?.configuration.ready ?? false,
       providerConfigured: snapshot?.apiKeyConfigured ?? query.data?.apiKeyConfigured ?? false,
       credentialWarning: query.data?.credentialWarning ?? "",
+      supportsAttachments,
     },
     feedback: {
       error:

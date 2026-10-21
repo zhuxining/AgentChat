@@ -300,7 +300,7 @@ describe("Runner typed operations", () => {
     }
   });
 
-  it("projects bounded summaries during execution and switches them to the newest conversation", async () => {
+  it("projects bounded summaries during execution and keeps them when reopening the Bot", async () => {
     const { runner } = await fixture(deterministicModels(400, true));
     try {
       const { bot, conversation } = await createChat(runner, "test-model");
@@ -323,10 +323,16 @@ describe("Runner typed operations", () => {
       ]);
       await reply(runner, conversation.id);
       expect((await runner.botSummaries())[0]?.latestMessage).toBe("确定性回复");
-      const newest = await runner.createConversation({ botId: bot.id, cwd: "", goal: "" });
+      const reopened = await runner.createConversation({ botId: bot.id, cwd: "", goal: "" });
       expect(await runner.botSummaries()).toEqual([
-        { botId: bot.id, conversationId: newest.id, latestMessage: "", executing: false },
+        {
+          botId: bot.id,
+          conversationId: conversation.id,
+          latestMessage: "确定性回复",
+          executing: false,
+        },
       ]);
+      expect(reopened.id).toBe(conversation.id);
     } finally {
       await runner.close();
     }

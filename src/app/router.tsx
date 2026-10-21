@@ -56,7 +56,7 @@ function SettingsSectionPage() {
         <ProviderSettings />
       </div>
       <div hidden={section !== "runner"}>
-        <RunnerSettings />
+        <RunnerSettings active={section === "runner"} />
       </div>
       <div hidden={section !== "about"}>
         <AboutSettings />

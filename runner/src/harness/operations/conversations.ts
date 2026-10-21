@@ -17,7 +17,7 @@ import { conversationById, requireIdle } from "./shared.js";
 
 const context = BACKGROUND_CONTEXT;
 
-// Conversation 生命周期：创建（含元数据与初始工作目标）与 Bot 配置应用。
+// 每个 Bot 持续使用已有 Conversation；首次打开时初始化，重复请求复用已有结果。
 export function createConversationOperations(
   harness: Harness,
   configuration: Configuration,
@@ -30,6 +30,11 @@ export function createConversationOperations(
     createConversation: (input: { botId: string; cwd: string; goal: string }) =>
       mutate(async () => {
         const bot = configuration.requireBot(input.botId);
+        const index = await harness.snapshot(ConversationIndex, context);
+        const existing = (index?.conversations ?? [])
+          .filter((item) => item.botId === bot.id)
+          .sort((left, right) => right.createdAt - left.createdAt || right.id - left.id)[0];
+        if (existing) return existing;
         const cwd = input.cwd ? resolve(configuration.dataDir, input.cwd) : bot.cwd;
         const agent = resolver.resolve({ ...bot, cwd });
         await prepareWorkspace(cwd);

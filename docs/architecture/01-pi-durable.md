@@ -206,7 +206,7 @@ Conversation.abort 的后台任务所有权范围按库契约处理，不能宣�
 
 Registry 安装随包 Extension，Bot 按名称选择。Extension 可集中提供 Tool、section、hook、wrapper 与 Task，持久状态放在对应能力旁。普通聊天使用内置 Task；有实际持久业务步骤时才使用 defineTask。TaskRuntime 是库调用接口，无须另启服务。
 
-当前编码工具和工作目标按此装配，不纳入计划模式。不动态加载任意代码；Skill/MCP 未来分别接入，不因依赖存在就声称支持。没有额外逐 Bot 审批体系，远程身份授权仍是独立边界。
+当前编码工具、工作目标和本机 stdio MCP Tool 都通过 Harness Registry 装配，不纳入计划模式。MCP Server 从 `runner.json` 显式配置；Runner 在启动、保存和重载配置时同步 Server 连接与发现的 Tool。Bot 必须显式选择发现的 Extension/Tool 才能执行；不支持远程或凭据型 MCP Server，也没有逐次工具调用审核。其他任意代码插件和 Skill 尚未接入；远程身份授权仍是独立边界。
 
 `harness/views.ts` 等读取公开状态并转换展示结果；`communication/` 校验请求并处理私有 stdio。当前 UI 使用快照刷新，不把库的 watch 能力描述为已实现完整客户端流协议。Task Graph 仅包含存活 Task，不是完整历史。未来监听应随连接清理，慢客户端不阻塞 Harness。
 
