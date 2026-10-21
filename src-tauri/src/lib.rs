@@ -50,6 +50,7 @@ pub fn run() {
             commands::runner_request,
             commands::attachments::pick_attachments,
             commands::attachments::delete_attachments,
+            commands::submissions::submit_with_attachments,
             commands::restart_runner,
             commands::start_runner,
             commands::stop_runner,

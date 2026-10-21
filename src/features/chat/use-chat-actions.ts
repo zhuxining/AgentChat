@@ -136,13 +136,6 @@ export function useChatActions(
             ? { ...current.inputsByConversation, [attempt.conversationId]: "" }
             : current.inputsByConversation,
       }));
-      if (attempt.attachments.length > 0) {
-        await client
-          .deleteAttachments(attempt.attachments.map(({ id }) => id))
-          .catch((cause: unknown) => {
-            setError(`消息已发送，但暂存附件未能立即清理：${errorMessage(cause)}`);
-          });
-      }
       try {
         await refresh(attempt.conversationId, assertCurrent);
       } catch (cause) {

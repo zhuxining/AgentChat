@@ -167,13 +167,6 @@ export type RunnerRequest =
   | { op: "applyBotSettings"; conversationId: number }
   | { op: "saveGoal"; conversationId: number; description: string }
   | { op: "setGoalStatus"; conversationId: number; status: "open" | "completed" }
-  | {
-      op: "submit";
-      conversationId: number;
-      text: string;
-      requestId: string;
-      attachments: AttachmentReference[];
-    }
   | { op: "abortSubmission"; conversationId: number; submissionId: number }
   | { op: "snapshot"; conversationId: number }
   | { op: "botSummaries" }
@@ -217,12 +210,21 @@ export const runnerClient = {
   pickAttachments: (remaining: number) =>
     invoke<DraftAttachment[]>("pick_attachments", { remaining }),
   deleteAttachments: (ids: string[]) => invoke<void>("delete_attachments", { ids }),
-  submit: (
+  submit: async (
     conversationId: number,
     text: string,
     requestId: string,
     attachments: AttachmentReference[],
-  ) => request<SubmissionResult>({ op: "submit", conversationId, text, requestId, attachments }),
+  ) => {
+    const reply = await invoke<RunnerReply<SubmissionResult>>("submit_with_attachments", {
+      conversationId,
+      text,
+      requestId,
+      attachments,
+    });
+    if (reply.result === null) throw new Error("Runner 响应缺少结果");
+    return reply.result;
+  },
   abortSubmission: (conversationId: number, submissionId: number) =>
     request<{ status: "aborted" | "already_placed" | "settled" | "not_found" }>({
       op: "abortSubmission",

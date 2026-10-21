@@ -91,9 +91,16 @@ pub async fn delete_attachments(ids: Vec<String>) -> Result<(), String> {
         return Err("附件引用无效".to_owned());
     }
     let data_dir = crate::host::data_dir()?;
-    tauri::async_runtime::spawn_blocking(move || delete_staged(&data_dir, ids))
+    tauri::async_runtime::spawn_blocking(move || delete_staged_ids(&data_dir, ids))
         .await
         .map_err(|_| "附件清理任务失败".to_owned())?
+}
+
+pub(crate) fn delete_staged_ids(data_dir: &Path, ids: Vec<String>) -> Result<(), String> {
+    if ids.len() > MAX_ATTACHMENTS || ids.iter().any(|id| parse_id(id).is_err()) {
+        return Err("附件引用无效".to_owned());
+    }
+    delete_staged(data_dir, ids)
 }
 
 pub fn cleanup_expired(data_dir: &Path) -> Result<(), String> {

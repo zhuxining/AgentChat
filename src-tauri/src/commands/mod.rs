@@ -3,6 +3,7 @@ use crate::runner::{RunnerReply, RunnerRequest};
 use tauri::State;
 
 pub mod attachments;
+pub mod submissions;
 
 #[tauri::command]
 pub fn runtime_status() -> crate::runtime::RuntimeStatus {
@@ -21,6 +22,9 @@ pub async fn runner_request(
     runner: State<'_, RunnerConnection>,
     request: RunnerRequest,
 ) -> Result<RunnerReply, String> {
+    if matches!(&request, RunnerRequest::Submit { .. }) {
+        return Err("消息提交必须使用专用提交命令".to_owned());
+    }
     let runner = runner.inner().clone();
     tauri::async_runtime::spawn_blocking(move || runner.request(request))
         .await
