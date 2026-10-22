@@ -62,22 +62,24 @@ pi-durable 公开接口和 Lorca routine 设计的核对记录见[长期记忆�
 
 **状态：Bot 模板导入和导出已移除，当前不提供模板文件分享。**
 
-**2026-10-22 实施规划：** 用户确认移动端调试工具已经连接。当前源码的移动端仍是说明页，Device Core、Relay、配对与业务同步尚未实现；平台安全存储也尚未验收。调试连接不等于业务多端连接，下方 2026-10-20 工具链记录保留为历史证据，不作为当前设备状态。
+**2026-10-22 实施更新：** iOS 模拟器宿主已完成构建和启动，当前移动端仍是说明页，Device Core、Relay、配对与业务同步尚未实现。用户明确手机只发送和展示会话，任何密钥或令牌不落盘，每次冷启动重新验证，因此取消移动安全存储前置并撤回探针，见 [P0 验证记录](../verification/multi-device-p0-ios.md)。下方 2026-10-20 工具链记录保留为历史证据，不作为当前设备状态。
 
 以[多端设计基线](../architecture/02-multi-device.md)为边界，任务、依赖及验收标准统一记录在 [多端实施计划 #9](https://github.com/zhuxining/AgentChat/issues/9)：
 
-| 阶段 | 实施任务 | 验收门禁 |
-| --- | --- | --- |
-| M0：平台与协议 | [P0 宿主、安全存储与协议决策 #10](https://github.com/zhuxining/AgentChat/issues/10) | 核验实际目标平台，收敛密码学、邀请、撤销、恢复、版本及保留契约；未决项不默认批准 |
-| M1：配对与只读 | [P1 Device Core #11](https://github.com/zhuxining/AgentChat/issues/11) → [P2 Relay 与配对 #12](https://github.com/zhuxining/AgentChat/issues/12) → [P3 后台 Runner 投影 #13](https://github.com/zhuxining/AgentChat/issues/13) → [P4 手机只读同步 #14](https://github.com/zhuxining/AgentChat/issues/14) | 桌面批准手机后可查看同一 Runner 的 Bot 和连续聊天；断线、前后台切换及重启后恢复 |
-| M2：文本首版 | [P5 持久 Outbox 与文本提交 #15](https://github.com/zhuxining/AgentChat/issues/15) → [P7 跨端验收 #17](https://github.com/zhuxining/AgentChat/issues/17) | 丢失确认和崩溃后同 requestId 找回既有接纳；多端消息不重复、未知结果不误报失败；实际设备验收 |
-| M3：控制与编辑 | [P6 定向控制和 Bot 编辑 #16](https://github.com/zhuxining/AgentChat/issues/16)，依赖 P5 | 迟到控制不影响新工作，编辑有版本冲突保护；逐项核验公开接口，不阻塞只读/文本首版 |
+| 阶段           | 实施任务                                                                                                                                                                                                                                                                                                 | 验收门禁                                                                                                    |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| M0：平台与协议 | [P0 宿主与临时会话协议 #10](https://github.com/zhuxining/AgentChat/issues/10)                                                                                                                                                                                                                            | 核验实际目标平台，收敛密码学、邀请、撤销、恢复、版本及保留契约；未决项不默认批准                            |
+| M1：配对与只读 | [P1 Device Core #11](https://github.com/zhuxining/AgentChat/issues/11) → [P2 Relay 与配对 #12](https://github.com/zhuxining/AgentChat/issues/12) → [P3 后台 Runner 投影 #13](https://github.com/zhuxining/AgentChat/issues/13) → [P4 手机只读同步 #14](https://github.com/zhuxining/AgentChat/issues/14) | 桌面批准手机临时会话后可查看同一 Runner 的 Bot 和连续聊天；同一会话断线和前后台恢复，冷启动重新验证后取快照 |
+| M2：文本首版   | [P5 Outbox 与文本提交 #15](https://github.com/zhuxining/AgentChat/issues/15) → [P7 跨端验收 #17](https://github.com/zhuxining/AgentChat/issues/17)                                                                                                                                                       | 同一会话重试复用 requestId；手机进程丢失后先对账，不自动重发未知请求；多端消息不重复，实际设备验收          |
+| M3：控制与编辑 | [P6 定向控制和 Bot 编辑 #16](https://github.com/zhuxining/AgentChat/issues/16)，依赖 P5                                                                                                                                                                                                                  | 迟到控制不影响新工作，编辑有版本冲突保护；逐项核验公开接口，不阻塞只读/文本首版                             |
 
 首个用户可见里程碑是 M1，只读验收通过后才开放手机输入。当前仅 P0 的研究与平台验证标为可执行；下游任务须待相关协议决策冻结并复核后再进入实现。配对确认只授权新设备加入，不审核 Agent 的工具调用。
 
 桌面后台 Host 持有网络生命周期与唯一写入权，手机不运行 Node/Harness，也不取得 Provider 凭据或 Runner Storage。首发不含附件服务、推送、多副本、云执行或多 Runner 调度/迁移；本计划不承诺手机后台常驻连接，也不自动部署或发布。
 
-每段验收必须覆盖错误签名、撤销设备、重复投递、断线恢复和敏感数据不出边界；协议与 key-storage 选择须先在目标平台验证，不能只凭文档或桌面构建推断移动端可用。
+移动首版仅开放会话展示与文本发送，Projection、游标和 Outbox 暂仅存内存，进程结束会丢失未上传内容；M3 不随手机首版开放。既有 Issues 中的移动持久身份、持久 Outbox 要求以本次边界为准，尚未同步修改远端 Issues。
+
+每段验收必须覆盖错误签名、撤销设备、重复投递、断线恢复和敏感数据不出边界；临时会话协议和凭据不落盘须在目标平台验证，不能只凭文档或桌面构建推断移动端可用。手机冷启动重新验证后取快照，同一会话重试复用 requestId；进程丢失后先对账，不以新身份自动重发未知结果请求。
 
 2026-10-20 本机工具链复核：通过显式 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` 使用已安装的 Xcode 27.1，`aarch64-apple-ios` 的 `cargo check` 与完整 `cargo build` 均通过；`iphoneos` SDK 可用。这仅验证 Rust target 编译，不代表 Tauri iOS 项目已初始化或宿主可启动。`tauri ios init --ci --skip-targets-install` 因缺少 `xcodegen` 尝试经 Homebrew 安装，但被另一既有 `brew reinstall xcodegen` 进程占用的下载锁阻塞，等待 180 秒后退出；本轮未改动该既有进程。当前没有可用 iOS Simulator runtime 或设备，因此尚未验证 Tauri iOS 构建、启动和平台安全存储。Android Studio、SDK/NDK、`adb` 和 Android Rust targets 仍未安装。Tauri 官方也要求 iOS 使用完整 Xcode，Android 使用 Android Studio、SDK/NDK 与相应 Rust targets，见[移动端前置条件](https://v2.tauri.app/start/prerequisites/)。Tauri 插件支持表将 Stronghold 在 iOS/Android 标为未知、未测试或计划中，故在目标平台验证前不把它选定为移动端密钥存储，见[官方插件平台支持表](https://github.com/tauri-apps/plugins-workspace/tree/v2)。下一步需完成 Tauri iOS 项目初始化，并在可用模拟器或设备上验证宿主构建/启动与安全存储，再决定是否进入身份协议和 Device Core 实现。
 
