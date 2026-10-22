@@ -2,6 +2,8 @@
 
 > **Status**: active（多端设计基线，尚未实现）；Relay 部署和密码学协议为 proposed。参考 Lorca 的 Device Core、加密同步与指定 Runner 路由，不复制其执行系统。
 
+实施拆分、依赖和验收标准见 [多端实施计划 #9](https://github.com/zhuxining/AgentChat/issues/9)；阶段入口见[功能路线](../plans/feature-alignment.md#阶段五共享与多端协作)。2026-10-22 用户确认移动端调试工具已连接，这不代表 Device Core、配对或业务同步已经实现，也不代表平台安全存储已经验收。先核验宿主与密钥存储并收敛协议，再依次开放只读同步、文本提交和定向控制；本文仍是设计基线，具体实施状态以 Issues 和验证记录为准。
+
 ## 通信分工
 
 目标是每台 Device 有本地 Rust Device Core，维护身份、展示 Projection、网络 Outbox 和同步状态。Runner 是独立后台执行宿主，不再定义为某台 Device；当前 Unix socket 与 Windows named pipe IPC 均有实现，Windows 仍待目标平台验证。Device Core 与后台的网络同步接入仍为后续设计。桌面与手机主动连接独立 Relay；手机不直接连接桌面局域网聊天服务，也不运行 Harness。执行配置、Storage 和生命周期详见[pi-durable 应用集成](01-pi-durable.md)。

@@ -1,5 +1,6 @@
 use crate::host::RunnerConnection;
-use crate::runner::{AttachmentReference, RunnerReply, RunnerRequest};
+use crate::runner::protocol::AttachmentReference;
+use crate::runner::{RunnerReply, RunnerRequest};
 use serde_json::Value;
 use tauri::State;
 

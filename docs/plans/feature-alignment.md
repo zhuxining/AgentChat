@@ -62,13 +62,20 @@ pi-durable 公开接口和 Lorca routine 设计的核对记录见[长期记忆�
 
 **状态：Bot 模板导入和导出已移除，当前不提供模板文件分享。**
 
-多端仍只有[设计基线](../architecture/02-multi-device.md)，尚无 Device Core、Relay 或移动端执行代码。后续按以下顺序推进，每一段验收通过后再打开下一段：
+**2026-10-22 实施规划：** 用户确认移动端调试工具已经连接。当前源码的移动端仍是说明页，Device Core、Relay、配对与业务同步尚未实现；平台安全存储也尚未验收。调试连接不等于业务多端连接，下方 2026-10-20 工具链记录保留为历史证据，不作为当前设备状态。
 
-1. **移动端宿主与密钥存储验证**：确认 Tauri iOS/Android 目标能构建和启动；验证平台安全存储接口，并保持 Runner、Node 和 Provider 凭据留在桌面 Runner。此段不创建账户或同步数据。
-2. **身份与配对协议**：先定稿并验证设备密钥层级、一次性配对、撤销、恢复和轮换，再实现本地 Device Core。Lorca 的 identity 与 relay-trust 文档作为参考；AgentChat 需保持手机不取得 Provider 凭据、Runner Storage 或执行环境。配对确认只授权新设备加入，不审核 Agent 的工具调用。
-3. **Relay 最小传输面**：实现设备认证/撤销、短期配对邮箱、加密记录的幂等上传和分页拉取；Relay 不解密产品数据、不执行 Agent。
-4. **只读 Projection 同步**：先同步桌面 Runner 导出的必要聊天视图，验证游标原子性、断线重连、旧状态拒绝和删除标记，再开放手机输入。
-5. **定向操作与结果**：最后加入签名/加密的请求信封、设备与目标 Runner 校验、幂等接纳、离线状态及迟到控制边界；工具调用继续受 Bot 已选 Extension/Tool 清单约束，不逐次审核。
+以[多端设计基线](../architecture/02-multi-device.md)为边界，任务、依赖及验收标准统一记录在 [多端实施计划 #9](https://github.com/zhuxining/AgentChat/issues/9)：
+
+| 阶段 | 实施任务 | 验收门禁 |
+| --- | --- | --- |
+| M0：平台与协议 | [P0 宿主、安全存储与协议决策 #10](https://github.com/zhuxining/AgentChat/issues/10) | 核验实际目标平台，收敛密码学、邀请、撤销、恢复、版本及保留契约；未决项不默认批准 |
+| M1：配对与只读 | [P1 Device Core #11](https://github.com/zhuxining/AgentChat/issues/11) → [P2 Relay 与配对 #12](https://github.com/zhuxining/AgentChat/issues/12) → [P3 后台 Runner 投影 #13](https://github.com/zhuxining/AgentChat/issues/13) → [P4 手机只读同步 #14](https://github.com/zhuxining/AgentChat/issues/14) | 桌面批准手机后可查看同一 Runner 的 Bot 和连续聊天；断线、前后台切换及重启后恢复 |
+| M2：文本首版 | [P5 持久 Outbox 与文本提交 #15](https://github.com/zhuxining/AgentChat/issues/15) → [P7 跨端验收 #17](https://github.com/zhuxining/AgentChat/issues/17) | 丢失确认和崩溃后同 requestId 找回既有接纳；多端消息不重复、未知结果不误报失败；实际设备验收 |
+| M3：控制与编辑 | [P6 定向控制和 Bot 编辑 #16](https://github.com/zhuxining/AgentChat/issues/16)，依赖 P5 | 迟到控制不影响新工作，编辑有版本冲突保护；逐项核验公开接口，不阻塞只读/文本首版 |
+
+首个用户可见里程碑是 M1，只读验收通过后才开放手机输入。当前仅 P0 的研究与平台验证标为可执行；下游任务须待相关协议决策冻结并复核后再进入实现。配对确认只授权新设备加入，不审核 Agent 的工具调用。
+
+桌面后台 Host 持有网络生命周期与唯一写入权，手机不运行 Node/Harness，也不取得 Provider 凭据或 Runner Storage。首发不含附件服务、推送、多副本、云执行或多 Runner 调度/迁移；本计划不承诺手机后台常驻连接，也不自动部署或发布。
 
 每段验收必须覆盖错误签名、撤销设备、重复投递、断线恢复和敏感数据不出边界；协议与 key-storage 选择须先在目标平台验证，不能只凭文档或桌面构建推断移动端可用。
 
